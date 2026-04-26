@@ -1,0 +1,59 @@
+name: wpsync-fixture
+
+services:
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  wp:
+    image: wordpress:6.7-apache
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      # Keep WP_DEBUG off — we don't want PHP notices polluting REST responses.
+      WORDPRESS_DEBUG: 0
+      # WP 6.x's wp_is_application_passwords_supported() returns true only when
+      # `is_ssl()` OR `wp_get_environment_type() === 'local'`. We're on plain
+      # HTTP, so explicitly mark this fixture as a local environment.
+      WP_ENVIRONMENT_TYPE: local
+    ports:
+      - "8888:80"
+    volumes:
+      - wp_files:/var/www/html
+
+  # wp-cli sidecar — spawned ad-hoc via `docker compose run --rm wp-cli ...`.
+  # We share the WP files volume so wp-cli reads the same wp-config.php that
+  # the running site uses.
+  wp-cli:
+    image: wordpress:cli
+    depends_on:
+      - wp
+    user: "33:33"
+    volumes:
+      - wp_files:/var/www/html
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+    profiles:
+      - cli
+
+volumes:
+  wp_files:

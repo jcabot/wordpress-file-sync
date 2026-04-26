@@ -1,0 +1,13 @@
+{
+  "name": "@wpsync/test-integration",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Integration tests for wpsync — drive the real CLI binary against a containerised WordPress fixture.",
+  "scripts": {
+    "test:integration": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

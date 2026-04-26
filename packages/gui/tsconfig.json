@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist-electron",
+    "rootDir": "./electron",
+    "tsBuildInfoFile": "./dist-electron/.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": ["electron/**/*"],
+  "references": [{ "path": "../core" }]
+}

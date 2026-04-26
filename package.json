@@ -1,0 +1,40 @@
+{
+  "name": "wordpress-file-sync",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Incremental, bidirectional sync between a WordPress site and a local directory.",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "build": "tsc -b && pnpm --filter @wpsync/gui build:renderer",
+    "clean": "tsc -b --clean",
+    "test": "pnpm -r test",
+    "test:integration": "pnpm build && pnpm --filter @wpsync/test-integration test:integration",
+    "fixture:up": "node test/fixtures/wordpress/wp-init.mjs",
+    "fixture:down": "docker compose -f test/fixtures/wordpress/docker-compose.yml down",
+    "fixture:reset": "docker compose -f test/fixtures/wordpress/docker-compose.yml down -v",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.20.0",
+    "globals": "^17.5.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.20.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "keytar"
+    ]
+  }
+}

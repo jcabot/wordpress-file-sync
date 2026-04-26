@@ -1,0 +1,24 @@
+{
+  "name": "@wpsync/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI for wpsync — bin: wpsync.",
+  "bin": {
+    "wpsync": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "test": "vitest run",
+    "dev": "tsx src/bin.ts"
+  },
+  "dependencies": {
+    "@wpsync/core": "workspace:*",
+    "commander": "^14.0.3"
+  }
+}

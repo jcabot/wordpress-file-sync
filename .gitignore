@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# TypeScript / Vite build output
+dist/
+**/dist-electron/
+**/dist-renderer/
+*.tsbuildinfo
+coverage/
+
+# electron-builder packaging output (per-package, large installers)
+packages/gui/release/
+
+# Generated artefacts from packaging (compiled C# 7za shim used to bypass
+# the macOS-symlinks-on-Windows extraction issue — see scripts/dist-win.mjs)
+packages/gui/scripts/7za-shim/7za.exe
+
+# Atomic-write temp files left behind by an interrupted pull or push
+**/*.tmp.[0-9]*
+
+# Local-only sync state inside any content directory (Application Password
+# fallback when keytar is unavailable — never commit credentials)
+**/.wpsync/secrets.json
+
+# Integration fixture state (provisioned by wp-init.mjs; contains the
+# WordPress Application Password for the local Docker fixture)
+test/fixtures/wordpress/app-password.txt
+
+# Debug PHP probes occasionally dropped into the fixture during diagnosis
+test/fixtures/wordpress/_*.php
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
