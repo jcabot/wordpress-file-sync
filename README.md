@@ -92,8 +92,9 @@ pnpm --filter @wpsync/gui dev   # Vite + Electron with hot-reload
 
 ```bash
 # 1. Scaffold a content directory
-mkdir my-blog && cd my-blog
-wpsync init https://example.com
+wpsync init https://example.com --dir my-blog
+cd my-blog
+# (or: cd into an existing folder first and run `wpsync init https://example.com`)
 
 # 2. Store your Application Password in the OS keychain
 wpsync auth set        # prompts for username + app password
@@ -232,7 +233,7 @@ Credentials live in your OS keychain under service `wpsync`, account `<site-url>
 ## CLI reference
 
 ```
-wpsync init [<site-url>]                              # scaffold config, prompt for credentials
+wpsync init [<site-url>] [--dir <path>]               # scaffold config, prompt for credentials
 wpsync pull   [--full] [--type post|page] [--dry-run] [--force-pull]
 wpsync push           [--type post|page] [--dry-run] [--force-push]
 wpsync status         [--type post|page]
@@ -241,7 +242,7 @@ wpsync auth   set | test | clear
 
 ### Commands
 
-- **`init`** — creates `.wpsync/config.toml` and `.wpsync/state.json`, then runs the auth flow. Idempotent; safe to re-run.
+- **`init`** — creates `.wpsync/config.toml` and `.wpsync/state.json`, then runs the auth flow. `--dir <path>` chooses (and creates if needed) the target directory; without it, the current working directory is used. Idempotent; safe to re-run.
 - **`pull`** — incremental by default. `--full` re-pulls everything (ignores `last_sync`). `--type` restricts to one type. `--dry-run` lists changes without writing. `--force-pull` overwrites local on conflict.
 - **`push`** — symmetric to pull. `--force-push` overwrites server on conflict.
 - **`status`** — read-only. Shows pending pulls (server newer), pending pushes (local newer), conflicts, and tombstones queued for deletion.

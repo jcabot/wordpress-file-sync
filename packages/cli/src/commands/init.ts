@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import {
   createCredentialStore,
   createSyncSession,
@@ -17,6 +18,7 @@ const GITIGNORE_LINE = '.wpsync/secrets.json';
 
 export interface InitOpts extends GlobalOpts {
   siteUrl?: string;
+  dir?: string;
 }
 
 function normaliseUrl(url: string): string {
@@ -41,7 +43,8 @@ async function ensureGitignore(rootDir: string): Promise<void> {
 }
 
 export async function initCommand(opts: InitOpts): Promise<void> {
-  const rootDir = resolveRootDir(opts);
+  const rootDir = opts.dir ? resolvePath(opts.dir) : resolveRootDir(opts);
+  if (opts.dir) await fs.mkdir(rootDir, { recursive: true });
 
   const siteUrlRaw =
     opts.siteUrl ?? process.env['WPSYNC_SITE_URL'] ?? (await prompt('Site URL: '));

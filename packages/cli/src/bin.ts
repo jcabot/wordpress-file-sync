@@ -26,8 +26,13 @@ program
 program
   .command('init [siteUrl]')
   .description('scaffold .wpsync/ and run the auth flow')
-  .action(async (siteUrl: string | undefined) => {
-    await initCommand({ ...program.opts(), ...(siteUrl ? { siteUrl } : {}) });
+  .option('-d, --dir <path>', 'directory to scaffold into (created if missing); defaults to cwd')
+  .action(async (siteUrl: string | undefined, cmdOpts: { dir?: string }) => {
+    await initCommand({
+      ...program.opts(),
+      ...(siteUrl ? { siteUrl } : {}),
+      ...(cmdOpts.dir ? { dir: cmdOpts.dir } : {}),
+    });
   });
 
 program
