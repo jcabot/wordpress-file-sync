@@ -48,6 +48,17 @@ export function parseLinkNext(linkHeader: string | null | undefined): string | n
   return null;
 }
 
+export function rewriteAsRestRoute(url: URL): URL | null {
+  const m = url.pathname.match(/^\/wp-json\/(.+)$/);
+  if (!m) return null;
+  const next = new URL(`${url.origin}/`);
+  next.searchParams.set('rest_route', `/${m[1]}`);
+  for (const [k, v] of url.searchParams.entries()) {
+    if (k !== 'rest_route') next.searchParams.append(k, v);
+  }
+  return next;
+}
+
 function basicAuth(username: string, password: string): string {
   return 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
 }
@@ -231,8 +242,7 @@ async function request(
 }
 
 async function* paginatedGet<T>(
-  fetchImpl: FetchImpl,
-  authHeader: string,
+  getResponse: (url: string | URL) => Promise<Response>,
   initialUrl: URL,
 ): AsyncIterable<T> {
   let url: string | URL = initialUrl;
@@ -241,7 +251,7 @@ async function* paginatedGet<T>(
   const baseUrl = new URL(initialUrl.toString());
 
   for (;;) {
-    const res = await request(fetchImpl, url, authHeader, { retry: true });
+    const res = await getResponse(url);
     const items = (await res.json()) as T[];
     for (const item of items) yield item;
 
@@ -268,6 +278,50 @@ export function createRestClient(opts: RestClientOptions): RestClient {
   const fetchImpl: FetchImpl = opts.fetchImpl ?? fetch;
   const authHeader = basicAuth(opts.username, opts.password);
 
+  let useRewrite = false;
+  let modeLocked = false;
+
+  function maybeRewrite(url: string | URL): string | URL {
+    if (!useRewrite) return url;
+    const u = url instanceof URL ? url : new URL(url);
+    return rewriteAsRestRoute(u) ?? url;
+  }
+
+  async function send(url: string | URL, reqOpts: RequestOpts = {}): Promise<Response> {
+    const initialUrl = maybeRewrite(url);
+    try {
+      const res = await request(fetchImpl, initialUrl, authHeader, reqOpts);
+      modeLocked = true;
+      return res;
+    } catch (err) {
+      if (
+        !modeLocked &&
+        !useRewrite &&
+        err instanceof TransportError &&
+        err.status === 404 &&
+        url instanceof URL
+      ) {
+        const fallback = rewriteAsRestRoute(url);
+        if (fallback) {
+          useRewrite = true;
+          modeLocked = true;
+          try {
+            return await request(fetchImpl, fallback, authHeader, reqOpts);
+          } catch (err2) {
+            if (err2 instanceof TransportError && err2.status === 404) {
+              throw new TransportError(
+                `REST API not reachable at ${opts.siteUrl} — tried both /wp-json/ and ?rest_route=/. Verify the site URL and that WordPress's REST API is enabled.`,
+                { status: 404 },
+              );
+            }
+            throw err2;
+          }
+        }
+      }
+      throw err;
+    }
+  }
+
   function listingParams(modifiedAfter: string | null | undefined): Record<string, string> {
     const params: Record<string, string> = {
       context: 'edit',
@@ -284,13 +338,13 @@ export function createRestClient(opts: RestClientOptions): RestClient {
   return {
     listItems(type, listOpts) {
       const url = buildUrl(opts.siteUrl, endpointFor(type), listingParams(listOpts.modifiedAfter));
-      return paginatedGet<RestItem>(fetchImpl, authHeader, url);
+      return paginatedGet<RestItem>((u) => send(u, { retry: true }), url);
     },
 
     async countItems(type, listOpts) {
       const params = { ...listingParams(listOpts.modifiedAfter), per_page: '1' };
       const url = buildUrl(opts.siteUrl, endpointFor(type), params);
-      const res = await request(fetchImpl, url, authHeader, { retry: true });
+      const res = await send(url, { retry: true });
       await res.text();
       const total = res.headers.get('x-wp-total');
       return total ? Number.parseInt(total, 10) : 0;
@@ -303,19 +357,19 @@ export function createRestClient(opts: RestClientOptions): RestClient {
         orderby: 'id',
         order: 'asc',
       });
-      return paginatedGet<TaxonomyTerm>(fetchImpl, authHeader, url);
+      return paginatedGet<TaxonomyTerm>((u) => send(u, { retry: true }), url);
     },
 
     async getMe() {
       const url = buildUrl(opts.siteUrl, 'users/me', { context: 'edit' });
-      const res = await request(fetchImpl, url, authHeader, { retry: true });
+      const res = await send(url, { retry: true });
       const body = (await res.json()) as { id: number; slug: string };
       return { id: body.id, slug: body.slug };
     },
 
     async createItem(type, payload) {
       const url = buildUrl(opts.siteUrl, endpointFor(type), { context: 'edit' });
-      const res = await request(fetchImpl, url, authHeader, {
+      const res = await send(url, {
         method: 'POST',
         body: JSON.stringify(payload),
         retry: false,
@@ -325,7 +379,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
 
     async updateItem(type, id, payload) {
       const url = buildUrl(opts.siteUrl, `${endpointFor(type)}/${id}`, { context: 'edit' });
-      const res = await request(fetchImpl, url, authHeader, {
+      const res = await send(url, {
         method: 'POST',
         body: JSON.stringify(payload),
         retry: false,
@@ -336,7 +390,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
     async deleteItem(type, id) {
       // PRD §4.5, §8 AC: never send `force=true` — trashes only, recoverable for 30 days.
       const url = buildUrl(opts.siteUrl, `${endpointFor(type)}/${id}`);
-      const res = await request(fetchImpl, url, authHeader, {
+      const res = await send(url, {
         method: 'DELETE',
         retry: false,
       });

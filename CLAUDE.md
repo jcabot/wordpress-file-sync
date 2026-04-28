@@ -57,7 +57,7 @@ CLI and GUI both subscribe to `session.events`. CLI pipes them to stdout (verbos
 
 | File | Responsibility |
 |---|---|
-| `rest-client.ts` | `fetch` wrapper, Basic Auth, **always `context=edit`**, `Link: rel="next"` paginator with fallback to `X-WP-TotalPages` + `?page=N`, retry-once on 5xx, `AuthError`/`TransportError` mapping |
+| `rest-client.ts` | `fetch` wrapper, Basic Auth, **always `context=edit`**, `Link: rel="next"` paginator with fallback to `X-WP-TotalPages` + `?page=N`, retry-once on 5xx, `AuthError`/`TransportError` mapping. On a 404 to `/wp-json/...`, transparently retries via `?rest_route=/wp/v2/...` and locks the mode for the rest of the session — handles WP sites with pretty permalinks disabled |
 | `frontmatter.ts` | `encode`/`decode` via `yaml` package |
 | `paths.ts` | slug→filename, type→subdir, `.wpsync/*` resolution |
 | `state.ts` | Atomic temp+rename writes for `.wpsync/state.json` and `.wpsync/config.toml` (`@iarna/toml`) |

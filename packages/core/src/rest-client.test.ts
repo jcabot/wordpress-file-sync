@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createRestClient, parseLinkNext } from './rest-client.js';
+import { createRestClient, parseLinkNext, rewriteAsRestRoute } from './rest-client.js';
 import { AuthError, TransportError } from './errors.js';
 
 describe('parseLinkNext', () => {
@@ -333,5 +333,83 @@ describe('rest-client', () => {
     });
     await expect(client.deleteItem('post', 1)).rejects.toBeInstanceOf(TransportError);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('rewriteAsRestRoute', () => {
+  it('rewrites /wp-json/ paths to ?rest_route= form, preserving query params', () => {
+    const url = new URL('https://example.com/wp-json/wp/v2/posts?context=edit&per_page=100');
+    const out = rewriteAsRestRoute(url);
+    expect(out).not.toBeNull();
+    expect(out?.pathname).toBe('/');
+    expect(out?.searchParams.get('rest_route')).toBe('/wp/v2/posts');
+    expect(out?.searchParams.get('context')).toBe('edit');
+    expect(out?.searchParams.get('per_page')).toBe('100');
+  });
+
+  it('returns null for URLs that are not /wp-json/ paths', () => {
+    expect(rewriteAsRestRoute(new URL('https://example.com/'))).toBeNull();
+    expect(rewriteAsRestRoute(new URL('https://example.com/?rest_route=/wp/v2/posts'))).toBeNull();
+  });
+});
+
+describe('rest-client permalink fallback', () => {
+  it('falls back to ?rest_route= when /wp-json/ returns 404, then locks the mode', async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('/wp-json/')) return new Response('not found', { status: 404 });
+      if (url.includes('rest_route=')) {
+        return new Response(JSON.stringify({ id: 9, slug: 'alice' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('unexpected', { status: 500 });
+    });
+    const client = createRestClient({
+      siteUrl: 'https://example.com',
+      username: 'a',
+      password: 'b',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const me = await client.getMe();
+    expect(me).toEqual({ id: 9, slug: 'alice' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/wp-json/');
+    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain('rest_route=');
+
+    const fetched: { id: number }[] = [];
+    fetchImpl.mockClear();
+    fetchImpl.mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('/wp-json/')) return new Response('not found', { status: 404 });
+      return new Response(JSON.stringify([{ id: 1 }, { id: 2 }]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'x-wp-totalpages': '1' },
+      });
+    });
+    for await (const item of client.listItems('post', {})) fetched.push(item as { id: number });
+    expect(fetched).toEqual([{ id: 1 }, { id: 2 }]);
+    for (const call of fetchImpl.mock.calls) {
+      expect(String(call[0])).toContain('rest_route=');
+      expect(String(call[0])).not.toContain('/wp-json/');
+    }
+  });
+
+  it('surfaces a unified error when both /wp-json/ and ?rest_route= return 404', async () => {
+    const fetchImpl = vi.fn(async () => new Response('not found', { status: 404 }));
+    const client = createRestClient({
+      siteUrl: 'https://example.com',
+      username: 'a',
+      password: 'b',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(client.getMe()).rejects.toMatchObject({
+      name: 'TransportError',
+      status: 404,
+      message: expect.stringContaining('tried both /wp-json/ and ?rest_route=/'),
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
