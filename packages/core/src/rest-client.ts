@@ -238,6 +238,24 @@ async function request(
       { status: res.status },
     );
   }
+  const urlStr = url.toString();
+  const method = (opts.method ?? 'GET').toUpperCase();
+  const looksLikeRest = /\/wp-json\//.test(urlStr) || /[?&]rest_route=/.test(urlStr);
+  if (method === 'GET' && looksLikeRest) {
+    const contentType = res.headers.get('content-type') ?? '';
+    if (!/json/i.test(contentType)) {
+      let snippet = '';
+      try {
+        snippet = (await res.text()).slice(0, 100);
+      } catch {
+        // ignore
+      }
+      throw new TransportError(
+        `Non-JSON response from ${urlStr} (Content-Type: ${contentType || 'missing'})${snippet ? `: ${snippet}` : ''} — WordPress may be returning a page instead of REST output (pretty permalinks disabled?).`,
+        { status: 404 },
+      );
+    }
+  }
   return res;
 }
 
@@ -310,7 +328,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
           } catch (err2) {
             if (err2 instanceof TransportError && err2.status === 404) {
               throw new TransportError(
-                `REST API not reachable at ${opts.siteUrl} — tried both /wp-json/ and ?rest_route=/. Verify the site URL and that WordPress's REST API is enabled.`,
+                `REST API not reachable at ${opts.siteUrl} — tried both /wp-json/ and ?rest_route=/, neither returned valid JSON. Verify the site URL and that WordPress's REST API is enabled.`,
                 { status: 404 },
               );
             }

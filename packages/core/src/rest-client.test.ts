@@ -412,4 +412,52 @@ describe('rest-client permalink fallback', () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+
+  it('falls back to ?rest_route= when /wp-json/ returns 200 with HTML', async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('/wp-json/')) {
+        return new Response('<link rel="https://api.w.org/" href="..."><html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+        });
+      }
+      return new Response(JSON.stringify({ id: 9, slug: 'alice' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    const client = createRestClient({
+      siteUrl: 'https://example.com',
+      username: 'a',
+      password: 'b',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const me = await client.getMe();
+    expect(me).toEqual({ id: 9, slug: 'alice' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain('rest_route=');
+  });
+
+  it('surfaces a unified error when both modes return non-JSON 200 responses', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response('<link rel="https://api.w.org/" href="...">', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+    );
+    const client = createRestClient({
+      siteUrl: 'https://example.com',
+      username: 'a',
+      password: 'b',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(client.getMe()).rejects.toMatchObject({
+      name: 'TransportError',
+      status: 404,
+      message: expect.stringContaining('neither returned valid JSON'),
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });
