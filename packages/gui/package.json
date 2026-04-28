@@ -1,6 +1,6 @@
 {
   "name": "@wpsync/gui",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Electron + React GUI for wpsync.",

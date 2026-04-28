@@ -4,7 +4,7 @@
 
 `wpsync` is a CLI + desktop GUI that mirrors WordPress posts and pages as plain `.html` files with YAML front-matter. Content round-trips losslessly: pull → edit locally → push, and the server sees exactly what it would have stored anyway. No theme/plugin/media sync, no real-time webhooks, no three-way merges — just a clean local copy of `wp_posts.post_content` you can grep, diff, and version-control.
 
-**Status:** v1 in development. See [Project status](#project-status) for the current milestone.
+**Status:** v1.0.0 released for Windows. See [Installation](#installation) to download, or [Project status](#project-status) for what's in the box.
 
 ---
 
@@ -59,29 +59,34 @@ If you write long-form posts, you probably already have a text editor you love. 
 
 ## Installation
 
-### From source (current — until v1 ships)
+### Desktop app (Windows)
+
+Download `wpsync-Setup-1.0.0.exe` from the [latest release](https://github.com/jcabot/wordpress-file-sync/releases/latest) and run the installer. On first launch the Setup wizard asks for your site URL, root folder, and Application Password, then runs an initial full pull.
+
+macOS DMG and Linux AppImage installers are not yet published — build them yourself from source (see below) or wait for a future release.
+
+### CLI
+
+The `@wpsync/cli` package is not yet on npm. Build it from source:
 
 ```bash
-git clone https://github.com/<your-fork>/wordpress-file-sync.git
+git clone https://github.com/jcabot/wordpress-file-sync.git
 cd wordpress-file-sync
 pnpm install
 pnpm -r build
-
-# Make the CLI runnable on your PATH
-pnpm --filter @wpsync/cli link --global
-# or invoke directly without linking:
+pnpm --filter @wpsync/cli link --global   # puts `wpsync` on your PATH
+# or invoke without linking:
 #   pnpm --filter @wpsync/cli exec wpsync ...
-
-# Run the GUI in dev mode
-pnpm --filter @wpsync/gui dev
 ```
 
-### From a release (planned)
+### From source (GUI dev mode)
 
-Once v1 ships:
-
-- **CLI:** `npm install -g @wpsync/cli` (or grab a single-binary release from the Releases page).
-- **GUI:** download the installer for Windows / macOS / Linux from the Releases page.
+```bash
+git clone https://github.com/jcabot/wordpress-file-sync.git
+cd wordpress-file-sync
+pnpm install
+pnpm --filter @wpsync/gui dev   # Vite + Electron with hot-reload
+```
 
 ## Quickstart (CLI)
 
@@ -264,7 +269,7 @@ wpsync auth   set | test | clear
 ## Development setup
 
 ```bash
-git clone https://github.com/<your-fork>/wordpress-file-sync.git
+git clone https://github.com/jcabot/wordpress-file-sync.git
 cd wordpress-file-sync
 pnpm install
 
