@@ -61,7 +61,7 @@ If you write long-form posts, you probably already have a text editor you love. 
 
 ### Desktop app (Windows)
 
-Download `wpsync-Setup-1.0.0.exe` from the [latest release](https://github.com/jcabot/wordpress-file-sync/releases/latest) and run the installer. On first launch the Setup wizard asks for your site URL, root folder, and Application Password, then runs an initial full pull.
+Download `wpsync.Setup.1.0.0.exe` from the [latest release](https://github.com/jcabot/wordpress-file-sync/releases/latest) and run the installer. The binary is unsigned, so Windows SmartScreen will warn on first run — click *More info → Run anyway*. On first launch the Setup wizard asks for your site URL, root folder, and Application Password, then runs an initial full pull.
 
 macOS DMG and Linux AppImage installers are not yet published — build them yourself from source (see below) or wait for a future release.
 
