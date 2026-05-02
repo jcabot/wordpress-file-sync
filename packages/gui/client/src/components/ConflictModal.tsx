@@ -30,15 +30,16 @@ export function ConflictModal({ slugs, onApply, onClose }: Props): JSX.Element {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
+          <span className="kicker">Errata · {slugs.length} item{slugs.length === 1 ? '' : 's'}</span>
           <h2>Resolve conflicts</h2>
           <p>
-            {slugs.length} item{slugs.length === 1 ? '' : 's'} changed on both sides since the last
-            sync. Pick how to resolve each one.
+            Changed on both sides since the last impression. Pick a winner per item — the run will
+            execute in a single pull-then-push pass.
           </p>
         </div>
 
         <div className="modal-bulk">
-          <span>Apply to all:</span>
+          <span>Apply to all</span>
           {OPTIONS.map((opt) => (
             <button key={opt.value} onClick={() => applyAll(opt.value)}>
               {opt.label}
@@ -47,23 +48,26 @@ export function ConflictModal({ slugs, onApply, onClose }: Props): JSX.Element {
         </div>
 
         <div className="modal-body">
-          {slugs.map((slug) => (
+          {slugs.map((slug, i) => (
             <div className="conflict-row" key={slug}>
-              <div className="conflict-slug">{slug}</div>
-              <div className="conflict-picker">
-                {OPTIONS.map((opt) => (
-                  <label key={opt.value} className={picks[slug] === opt.value ? 'active' : ''}>
-                    <input
-                      type="radio"
-                      name={`pick-${slug}`}
-                      value={opt.value}
-                      checked={picks[slug] === opt.value}
-                      onChange={() => setPick(slug, opt.value)}
-                    />
-                    <span>{opt.label}</span>
-                    <span className="hint">{opt.hint}</span>
-                  </label>
-                ))}
+              <div className="conflict-num">№ {String(i + 1).padStart(2, '0')}</div>
+              <div>
+                <div className="conflict-slug">{slug}</div>
+                <div className="conflict-picker">
+                  {OPTIONS.map((opt) => (
+                    <label key={opt.value} className={picks[slug] === opt.value ? 'active' : ''}>
+                      <input
+                        type="radio"
+                        name={`pick-${slug}`}
+                        value={opt.value}
+                        checked={picks[slug] === opt.value}
+                        onChange={() => setPick(slug, opt.value)}
+                      />
+                      <span>{opt.label}</span>
+                      <span className="hint">{opt.hint}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
           ))}
@@ -72,7 +76,7 @@ export function ConflictModal({ slugs, onApply, onClose }: Props): JSX.Element {
         <div className="modal-footer">
           <button onClick={onClose}>Cancel</button>
           <button className="primary" onClick={() => onApply(picks)}>
-            Apply resolutions
+            Apply resolutions →
           </button>
         </div>
       </div>

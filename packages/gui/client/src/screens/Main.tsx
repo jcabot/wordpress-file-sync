@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { type JSX, useEffect, useRef, useState } from 'react';
 import {
   api,
   type BridgeEvent,
@@ -158,96 +158,95 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
 
   return (
     <>
-      <div className="header">
-        <div>
-          <h1>{siteUrl}</h1>
-          <div className="meta">{rootDir}</div>
+      <header className="masthead">
+        <div className="masthead-top">
+          <span className="vol">Vol. I · Letterpress Edition</span>
+          <span className="dateline">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div className="meta">
-            last sync: <strong>{lastSync ?? 'never'}</strong>
+        <h1 className="wordmark">
+          wpsync<span className="ampersand">live</span>
+        </h1>
+        <div className="subtitle-row">
+          <div className="subtitle">
+            <strong>{siteUrl}</strong>
+            <span style={{ margin: '0 10px', color: 'var(--ink-faint)' }}>·</span>
+            <span>{rootDir}</span>
           </div>
-          <button onClick={onOpenSettings} aria-label="Settings" title="Settings">
-            ⚙
-          </button>
+          <div className="subtitle" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <span>last impression: <strong>{lastSync ?? '—'}</strong></span>
+            <button className="smallcaps" onClick={onOpenSettings} aria-label="Settings">
+              Settings
+            </button>
+          </div>
         </div>
-      </div>
+        <div className="masthead-rule" />
+      </header>
 
       <div className="content">
         {error && <div className="banner bad">{error}</div>}
 
         <div className="actions-strip">
           <button className="primary" disabled={busy} onClick={() => runPull(false)}>
-            {phase === 'pulling' ? 'Pulling…' : 'Pull'}
+            {phase === 'pulling' ? 'Pulling…' : '↓ Pull'}
           </button>
           <button disabled={busy} onClick={() => runPush(false)}>
-            {phase === 'pushing' ? 'Pushing…' : 'Push'}
+            {phase === 'pushing' ? 'Pushing…' : '↑ Push'}
           </button>
           <button disabled={busy} onClick={() => void refreshStatus()}>
-            Refresh status
+            ⟳ Refresh
           </button>
-          <div className="progress">{progress || (busy ? 'Working…' : 'Idle')}</div>
+          <div className="progress">{progress || (busy ? 'Setting type…' : 'At rest, awaiting press.')}</div>
         </div>
 
-        <div className="main-grid">
-          <div className="panel">
-            <h3>Status</h3>
-            <div className="count-row">
-              <span>Pending pulls (server changed)</span>
-              <span className={`badge ${counts.pendingPull > 0 ? 'warn' : ''}`}>{counts.pendingPull}</span>
-            </div>
-            <div className="count-row">
-              <span>Pending pushes (local changed)</span>
-              <span className={`badge ${counts.pendingPush > 0 ? 'warn' : ''}`}>{counts.pendingPush}</span>
-            </div>
-            <div className="count-row">
-              <span>New local files</span>
-              <span className={`badge ${counts.newLocal > 0 ? 'warn' : ''}`}>{counts.newLocal}</span>
-            </div>
-            <div className="count-row">
-              <span>Tombstones queued</span>
-              <span className={`badge ${counts.tombstone > 0 ? 'warn' : ''}`}>{counts.tombstone}</span>
-            </div>
-            <div className="count-row">
-              <span>Conflicts</span>
-              <span className={`badge ${counts.conflict > 0 ? 'bad' : ''}`}>{counts.conflict}</span>
-            </div>
-            <div className="count-row">
-              <span>Up to date</span>
-              <span className={`badge good`}>{counts.upToDate}</span>
-            </div>
-          </div>
+        <div className="stats-inset">
+          <StatCell label="Pending pulls" value={counts.pendingPull} kind={counts.pendingPull > 0 ? 'warn' : ''} />
+          <StatCell label="Pending pushes" value={counts.pendingPush} kind={counts.pendingPush > 0 ? 'warn' : ''} />
+          <StatCell label="New local" value={counts.newLocal} kind={counts.newLocal > 0 ? 'warn' : ''} />
+          <StatCell label="Tombstones" value={counts.tombstone} kind={counts.tombstone > 0 ? 'warn' : ''} />
+          <StatCell label="Conflicts" value={counts.conflict} kind={counts.conflict > 0 ? 'bad' : ''} />
+          <StatCell label="Up to date" value={counts.upToDate} kind="good" />
+        </div>
 
-          <div className="panel">
-            <h3>Conflict resolution</h3>
-            <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: 13 }}>
-              On conflict, the global force buttons resolve every conflict the same way. The
-              per-slug picker arrives in the next milestone.
-            </p>
+        <div className="columns">
+          <div className="column">
+            <span className="kicker">Section A</span>
+            <h3>The Press Floor</h3>
+            <p className="deck">Two motions sync your work. Pull brings the server's latest into your editor; push commits your edits back to the live site. Round-trip is byte-identical.</p>
             <div className="actions">
-              <button disabled={busy} onClick={() => runPull(true)}>
-                Force pull (server wins)
-              </button>
-              <button disabled={busy} onClick={() => runPush(true)}>
-                Force push (local wins)
-              </button>
+              <button disabled={busy} onClick={() => runPull(false)}>↓ Pull</button>
+              <button disabled={busy} onClick={() => runPush(false)}>↑ Push</button>
+            </div>
+          </div>
+
+          <div className="column">
+            <span className="kicker">Section B · Errata</span>
+            <h3>Force a direction</h3>
+            <p className="deck">When both sides have moved since the last sync, the press halts. Choose a winning direction here, or open the per-slug picker from the conflict modal.</p>
+            <div className="actions">
+              <button disabled={busy} onClick={() => runPull(true)}>↓ Force pull</button>
+              <button disabled={busy} onClick={() => runPush(true)}>↑ Force push</button>
             </div>
           </div>
         </div>
 
-        <h3 style={{ marginTop: 24, marginBottom: 8, color: 'var(--muted)', fontSize: 12, letterSpacing: '0.05em' }}>
-          ACTIVITY
-        </h3>
-        <div className="log">
-          {log.length === 0 && <div className="ts">No activity yet.</div>}
-          {log.map((line, i) => (
-            <div key={i}>
-              <span className="ts">{line.ts}</span>
-              <span className={line.cls}>{line.text}</span>
-            </div>
-          ))}
-          <div ref={logEndRef} />
-        </div>
+        <section className="log-section">
+          <span className="kicker">Section C · Activity</span>
+          <div className="section-title">
+            <h3>Teletype</h3>
+            <span className="rule" />
+            <span className="serial">{log.length} lines</span>
+          </div>
+          <div className="log">
+            {log.length === 0 && <div className="ts">No impressions yet. Press a key above to begin.</div>}
+            {log.map((line, i) => (
+              <div key={i}>
+                <span className="ts">{line.ts}</span>
+                <span className={line.cls}>{line.text}</span>
+              </div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
+        </section>
       </div>
 
       {conflictSlugs && (
@@ -260,5 +259,15 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
         />
       )}
     </>
+  );
+}
+
+function StatCell({ label, value, kind }: { label: string; value: number; kind: string }): JSX.Element {
+  return (
+    <div className={`stat-cell ${kind}`}>
+      <span className="label">{label}</span>
+      <span className="value">{value}</span>
+      <span className="hairline" />
+    </div>
   );
 }

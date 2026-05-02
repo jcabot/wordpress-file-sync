@@ -3,86 +3,48 @@
   "version": "1.0.2",
   "private": true,
   "type": "module",
-  "description": "Electron + React GUI for wpsync.",
-  "main": "./dist-electron/main.js",
+  "description": "Local Express + React web GUI for wpsync.",
+  "main": "./dist-server/main.js",
   "files": [
-    "dist-electron",
-    "dist-renderer",
-    "electron",
-    "src",
-    "index.html"
+    "dist-server",
+    "dist-client",
+    "server",
+    "client",
+    "start.bat",
+    "start.sh"
   ],
   "scripts": {
-    "build": "tsc -b && vite build",
-    "build:electron": "tsc -b",
-    "build:renderer": "vite build",
-    "typecheck:renderer": "tsc -p tsconfig.renderer.json --noEmit",
-    "clean": "tsc -b --clean",
+    "build": "tsc -b server/tsconfig.json && vite build --config client/vite.config.ts",
+    "build:server": "tsc -b server/tsconfig.json",
+    "build:client": "vite build --config client/vite.config.ts",
+    "clean": "tsc -b server/tsconfig.json --clean",
     "test": "vitest run --passWithNoTests",
-    "dev": "concurrently -k -n vite,electron \"vite\" \"tsx --watch electron/main.ts\"",
-    "dev:renderer": "vite",
-    "dev:electron": "tsx --watch electron/main.ts",
-    "start": "electron .",
-    "dist": "pnpm build && electron-builder",
-    "dist:win": "node scripts/dist-win.mjs",
-    "dist:mac": "pnpm build && electron-builder --mac",
-    "dist:linux": "pnpm build && electron-builder --linux"
+    "dev": "concurrently -k -n server,vite \"pnpm dev:server\" \"pnpm dev:client\"",
+    "dev:server": "tsx watch server/src/main.ts",
+    "dev:client": "vite --config client/vite.config.ts",
+    "start": "node dist-server/main.js",
+    "typecheck": "tsc -b server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@wpsync/core": "workspace:*",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "lucide-react": "^0.475.0",
+    "open": "^10.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
-    "concurrently": "^9.2.1",
-    "electron": "^41.3.0",
-    "electron-builder": "^26.8.1",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "supertest": "^7.0.0",
+    "@types/supertest": "^6.0.2",
     "tsx": "^4.21.0",
-    "vite": "^8.0.10"
-  },
-  "build": {
-    "appId": "com.livablesoftware.wpsync",
-    "productName": "wpsync",
-    "copyright": "Jordi Cabot",
-    "directories": {
-      "output": "release",
-      "buildResources": "build-resources"
-    },
-    "files": [
-      "dist-electron/**/*",
-      "dist-renderer/**/*",
-      "package.json"
-    ],
-    "extraMetadata": {
-      "main": "dist-electron/main.js"
-    },
-    "asar": true,
-    "asarUnpack": [
-      "**/keytar/**",
-      "**/@iarna/toml/**"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        }
-      ]
-    },
-    "mac": {
-      "target": "dmg",
-      "category": "public.app-category.developer-tools"
-    },
-    "linux": {
-      "target": "AppImage",
-      "category": "Development"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
+    "vite": "^6.0.7"
   }
 }

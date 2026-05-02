@@ -259,6 +259,19 @@ async function request(
   return res;
 }
 
+async function parseJson<T>(res: Response, urlForError: string): Promise<T> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const snippet = text.slice(0, 100).replace(/\s+/g, ' ').trim();
+    throw new TransportError(
+      `Non-JSON response from ${urlForError} (Content-Type claimed JSON but body was not)${snippet ? `: ${snippet}` : ''} — WordPress may be behind a cache or CDN that's returning an HTML page in place of the REST API.`,
+      { status: 502 },
+    );
+  }
+}
+
 async function* paginatedGet<T>(
   getResponse: (url: string | URL) => Promise<Response>,
   initialUrl: URL,
@@ -270,7 +283,7 @@ async function* paginatedGet<T>(
 
   for (;;) {
     const res = await getResponse(url);
-    const items = (await res.json()) as T[];
+    const items = await parseJson<T[]>(res, url.toString());
     for (const item of items) yield item;
 
     const nextFromLink = parseLinkNext(res.headers.get('link'));
@@ -381,7 +394,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
     async getMe() {
       const url = buildUrl(opts.siteUrl, 'users/me', { context: 'edit' });
       const res = await send(url, { retry: true });
-      const body = (await res.json()) as { id: number; slug: string };
+      const body = await parseJson<{ id: number; slug: string }>(res, url.toString());
       return { id: body.id, slug: body.slug };
     },
 
@@ -392,7 +405,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
         body: JSON.stringify(payload),
         retry: false,
       });
-      return (await res.json()) as RestItem;
+      return parseJson<RestItem>(res, url.toString());
     },
 
     async updateItem(type, id, payload) {
@@ -402,7 +415,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
         body: JSON.stringify(payload),
         retry: false,
       });
-      return (await res.json()) as RestItem;
+      return parseJson<RestItem>(res, url.toString());
     },
 
     async deleteItem(type, id) {

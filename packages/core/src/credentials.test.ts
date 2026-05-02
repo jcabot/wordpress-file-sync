@@ -1,11 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
-vi.mock('keytar', () => {
-  throw new Error('keytar unavailable in test');
-});
 
 let root: string;
 
@@ -16,28 +12,37 @@ beforeEach(async () => {
   };
 });
 
-describe('CredentialStore (fallback path)', () => {
-  it('round-trips a password through the encrypted file', async () => {
+describe('CredentialStore', () => {
+  it('round-trips a password through credentials.json', async () => {
     const { createCredentialStore } = await import('./credentials.js');
     const store = createCredentialStore(root);
-    expect(await store.backendName()).toBe('fallback');
 
     expect(await store.get('https://example.com')).toBeNull();
 
     await store.set('https://example.com', 'super-secret-app-password');
-    const got = await store.get('https://example.com');
-    expect(got).toBe('super-secret-app-password');
+    expect(await store.get('https://example.com')).toBe('super-secret-app-password');
   });
 
-  it('does not persist the plaintext to disk', async () => {
+  it('writes a plain-JSON credentials.json under .wpsync/', async () => {
     const { createCredentialStore } = await import('./credentials.js');
-    const { promises: fs } = await import('node:fs');
     const store = createCredentialStore(root);
 
     await store.set('https://example.com', 'plaintext-marker-xyz');
-    const path = join(root, '.wpsync', 'secrets.json');
-    const text = await fs.readFile(path, 'utf8');
-    expect(text).not.toContain('plaintext-marker-xyz');
+    const path = join(root, '.wpsync', 'credentials.json');
+    const text = await readFile(path, 'utf8');
+    const parsed = JSON.parse(text);
+    expect(parsed.version).toBe(1);
+    expect(parsed.entries['https://example.com']).toBe('plaintext-marker-xyz');
+  });
+
+  it('writes credentials.json with mode 0600 on POSIX', async () => {
+    if (process.platform === 'win32') return;
+    const { createCredentialStore } = await import('./credentials.js');
+    const store = createCredentialStore(root);
+    await store.set('https://example.com', 'pw');
+    const path = join(root, '.wpsync', 'credentials.json');
+    const st = await stat(path);
+    expect(st.mode & 0o777).toBe(0o600);
   });
 
   it('clear() removes the entry', async () => {

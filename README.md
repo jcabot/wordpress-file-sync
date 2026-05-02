@@ -2,9 +2,9 @@
 
 > Incremental, bidirectional sync between a WordPress site and a local directory — so you can edit posts in your favourite text editor and track them in Git.
 
-`wpsync` is a CLI + desktop GUI that mirrors WordPress posts and pages as plain `.html` files with YAML front-matter. Content round-trips losslessly: pull → edit locally → push, and the server sees exactly what it would have stored anyway. No theme/plugin/media sync, no real-time webhooks, no three-way merges — just a clean local copy of `wp_posts.post_content` you can grep, diff, and version-control.
+`wpsync` is a CLI + local web GUI that mirrors WordPress posts and pages as plain `.html` files with YAML front-matter. Content round-trips losslessly: pull → edit locally → push, and the server sees exactly what it would have stored anyway. No theme/plugin/media sync, no real-time webhooks, no three-way merges — just a clean local copy of `wp_posts.post_content` you can grep, diff, and version-control.
 
-**Status:** v1.0.0 released for Windows. See [Installation](#installation) to download, or [Project status](#project-status) for what's in the box.
+**Status:** v1 feature-complete. The GUI is now a local Express + React web app you launch from your terminal — no installer required. See [Installation](#installation) to get started.
 
 ---
 
@@ -45,13 +45,13 @@ If you write long-form posts, you probably already have a text editor you love. 
 
 - Talks to WordPress via the **REST API v2** (`/wp-json/wp/v2/`) using `context=edit` so it receives raw `post_content`, not rendered HTML.
 - Authenticates with **Application Passwords** (built into WP core since 5.6) sent as HTTP Basic Auth over HTTPS.
-- Stores credentials in the **OS keychain** (macOS Keychain / libsecret / Windows Credential Manager) via `keytar`, with an encrypted file fallback. Credentials never appear in `state.json`, log output, or anything Git-tracked.
+- Stores the Application Password in `<root>/.wpsync/credentials.json` (file mode `600` on POSIX), gitignored by default. Credentials never appear in `state.json`, log output, or any Git-tracked file.
 - Tracks per-post state in YAML front-matter (post ID + last known server `modified_gmt`); tracks site-level state in `.wpsync/state.json` (`last_sync` timestamp).
 - Detects conflicts when both sides changed since `last_sync` and halts safely with **zero writes** until you resolve.
 
 ## Requirements
 
-- **Node.js** ≥ 20 (for the CLI and to run the GUI from source).
+- **Node.js** ≥ 20 (CLI and GUI both run on plain Node).
 - **pnpm** ≥ 9 (workspace package manager).
 - A WordPress site running **WP ≥ 5.6**, reachable over HTTPS, with the REST API enabled.
 - A WordPress user with `edit_posts` capability and an **Application Password** (generate at *Users → Profile → Application Passwords* in wp-admin).
@@ -59,34 +59,29 @@ If you write long-form posts, you probably already have a text editor you love. 
 
 ## Installation
 
-### Desktop app (Windows)
-
-Download `wpsync.Setup.1.0.0.exe` from the [latest release](https://github.com/jcabot/wordpress-file-sync/releases/latest) and run the installer. The binary is unsigned, so Windows SmartScreen will warn on first run — click *More info → Run anyway*. On first launch the Setup wizard asks for your site URL, root folder, and Application Password, then runs an initial full pull.
-
-macOS DMG and Linux AppImage installers are not yet published — build them yourself from source (see below) or wait for a future release.
-
-### CLI
-
-The `@wpsync/cli` package is not yet on npm. Build it from source:
+There's no prebuilt installer; both the CLI and the GUI run directly from the cloned repo:
 
 ```bash
 git clone https://github.com/jcabot/wordpress-file-sync.git
 cd wordpress-file-sync
 pnpm install
-pnpm -r build
-pnpm --filter @wpsync/cli link --global   # puts `wpsync` on your PATH
+pnpm build
+```
+
+For the **CLI**, link it onto your `PATH` once:
+
+```bash
+pnpm --filter @wpsync/cli link --global   # exposes `wpsync` globally
 # or invoke without linking:
-#   pnpm --filter @wpsync/cli exec wpsync ...
+pnpm --filter @wpsync/cli exec wpsync ...
 ```
 
-### From source (GUI dev mode)
+For the **GUI**, run the launcher from `packages/gui/`:
 
-```bash
-git clone https://github.com/jcabot/wordpress-file-sync.git
-cd wordpress-file-sync
-pnpm install
-pnpm --filter @wpsync/gui dev   # Vite + Electron with hot-reload
-```
+- Windows: double-click `packages/gui/start.bat` (or run it from a terminal).
+- macOS / Linux: `bash packages/gui/start.sh`.
+
+The launcher runs `pnpm install`, starts the Express backend + Vite dev server, and opens `http://localhost:5173` in your default browser.
 
 ## Quickstart (CLI)
 
@@ -96,7 +91,7 @@ wpsync init https://example.com --dir my-blog
 cd my-blog
 # (or: cd into an existing folder first and run `wpsync init https://example.com`)
 
-# 2. Store your Application Password in the OS keychain
+# 2. Store your Application Password in .wpsync/credentials.json (mode 600)
 wpsync auth set        # prompts for username + app password
 wpsync auth test       # GET /wp/v2/users/me — confirms credentials work
 
@@ -119,14 +114,39 @@ Subsequent `wpsync pull` invocations are incremental — only items modified aft
 
 ## GUI
 
-For the same flow without the terminal, launch the desktop app:
+The GUI is a local web app: an Express backend (port `4319` by default, loopback only) plus a Vite-built React frontend served either by Vite in dev (port `5173`) or by Express in production. Launch it from `packages/gui/start.bat` (Windows) or `packages/gui/start.sh` (POSIX), and your browser opens to the right page automatically.
 
-- **First run** opens a Setup wizard that asks for the site URL, root folder, and Application Password, validates each (`GET /wp-json/`, then `GET /wp/v2/users/me`), then runs an initial `pull --full` with progress.
-- **Main view** shows the site URL and folder, counts of pending pulls/pushes/conflicts, last sync timestamp, **Pull** and **Push** buttons with per-item progress, and a recent activity log.
+- **First run** opens a Setup wizard that asks for the site URL, root folder (server-side directory picker — no native dialog needed), and Application Password, validates each (`GET /wp-json/`, then `GET /wp/v2/users/me`), and writes `.wpsync/config.toml`, `.wpsync/state.json`, and `.wpsync/credentials.json`.
+- **Main view** shows the site URL and folder, counts of pending pulls/pushes/conflicts, last sync timestamp, **Pull** and **Push** buttons with per-item progress, and a recent activity log. Progress events stream over **Server-Sent Events** (`/api/events`) — no polling.
 - **Conflict modal** appears when a sync halts on conflicts, listing each slug with *Keep local*, *Keep server*, or *Skip* radio options.
-- **Settings** lets you test or update credentials, reconfigure site URL/folder, or open `config.toml` directly for advanced flags.
+- **Settings** lets you test or update credentials, switch content folders, or open `config.toml` directly for advanced flags.
 
-The GUI imports the same sync library the CLI uses — there's no subprocess in between, so progress events stream in real time.
+The Express backend imports `@wpsync/core` directly — there's no subprocess or stdin/stdout IPC between the HTTP layer and the sync logic. The CLI and GUI share exactly the same engine.
+
+### Production mode (single port)
+
+```bash
+pnpm --filter @wpsync/gui build       # tsc -b + vite build → dist-server + dist-client
+pnpm --filter @wpsync/gui start       # Express on 4319, serves the built bundle + API
+```
+
+In production mode the Vite dev server is not running; Express serves the built static client at `/` and the API at `/api/*` on the same port.
+
+### Remote access
+
+The Express server binds to `127.0.0.1` only. This is **deliberate** — the API has no authentication and several endpoints (filesystem listing, opening files in the OS default editor, manipulating WordPress credentials) would be dangerous to expose on the network. Don't change the bind to `0.0.0.0` unless you intend to put a reverse proxy with auth in front of it.
+
+To use the GUI from another machine without exposing it, tunnel the loopback port over SSH:
+
+```bash
+# On your laptop, forwards localhost:4319 → vps's 127.0.0.1:4319
+ssh -L 4319:127.0.0.1:4319 user@your-vps
+
+# In a browser on your laptop:
+open http://localhost:4319
+```
+
+Same UX as running locally; no public surface, no auth to maintain.
 
 ## On-disk layout
 
@@ -136,17 +156,17 @@ my-blog/
 │   ├── config.toml         # site URL, content dir, enabled types, username
 │   ├── state.json          # last_sync timestamp, schema version
 │   ├── taxonomy.json       # cached category/tag ID ↔ slug map
-│   └── secrets.json        # ONLY when OS keychain is unavailable; chmod 600
+│   └── credentials.json    # stored Application Password; chmod 600 (POSIX)
 ├── posts/
 │   ├── my-first-post.html
 │   └── another-post.html
 ├── pages/
 │   ├── about.html
 │   └── contact.html
-└── .gitignore              # excludes .wpsync/secrets.json by default
+└── .gitignore              # excludes .wpsync/credentials.json by default
 ```
 
-Commit `.wpsync/config.toml` and `.wpsync/state.json` if you want — neither contains secrets. `secrets.json` is gitignored by default.
+Commit `.wpsync/config.toml` and `.wpsync/state.json` if you want — neither contains secrets. `credentials.json` is gitignored by default; `wpsync init` writes the `.gitignore` line for you.
 
 ## File format
 
@@ -228,7 +248,20 @@ username     = "your-wp-user"
 }
 ```
 
-Credentials live in your OS keychain under service `wpsync`, account `<site-url>`. The keychain entry holds only the Application Password — the username comes from `config.toml`.
+`.wpsync/credentials.json` (created by `wpsync init` / `wpsync auth set` and updated by the GUI's setup wizard):
+
+```json
+{
+  "version": 1,
+  "entries": {
+    "https://example.com": "<application-password>"
+  }
+}
+```
+
+The file is written with mode `600` on POSIX so only your user can read it. It is gitignored by default. The username comes from `config.toml`; only the password lives here.
+
+The GUI also reads `packages/gui/.env` for installation-wide settings — see `packages/gui/.env.example` for the available variables (`WPSYNC_PORT`, `WPSYNC_DEV`, `WPSYNC_OPEN_BROWSER`).
 
 ## CLI reference
 
@@ -246,9 +279,9 @@ wpsync auth   set | test | clear
 - **`pull`** — incremental by default. `--full` re-pulls everything (ignores `last_sync`). `--type` restricts to one type. `--dry-run` lists changes without writing. `--force-pull` overwrites local on conflict.
 - **`push`** — symmetric to pull. `--force-push` overwrites server on conflict.
 - **`status`** — read-only. Shows pending pulls (server newer), pending pushes (local newer), conflicts, and tombstones queued for deletion.
-- **`auth set`** — stores a new Application Password in the OS keychain.
-- **`auth test`** — verifies credentials via `GET /wp/v2/users/me`.
-- **`auth clear`** — removes the credential from the keychain.
+- **`auth set`** — stores a new Application Password in `.wpsync/credentials.json`.
+- **`auth test`** — verifies the stored credentials via `GET /wp/v2/users/me`.
+- **`auth clear`** — removes the entry for this site from `credentials.json`.
 
 ### Global flags
 
@@ -274,63 +307,54 @@ git clone https://github.com/jcabot/wordpress-file-sync.git
 cd wordpress-file-sync
 pnpm install
 
-# Build everything
-pnpm -r build
+# Build everything (TypeScript project refs + Vite client bundle)
+pnpm build
 
 # Run unit tests across all packages
-pnpm -r test
+pnpm test
 
 # Run the CLI from source against a real WP
 pnpm --filter @wpsync/cli dev -- pull
 
-# Run the GUI in dev mode (Vite renderer + tsx-driven Electron main)
+# Run the GUI in dev mode (Express + Vite with hot-reload)
 pnpm --filter @wpsync/gui dev
-
-# Build distributable installers (electron-builder)
-pnpm --filter @wpsync/gui dist
 ```
 
 ### Workspace layout
 
 ```
 packages/
-├── core/   # @wpsync/core — sync library, no Node-CLI/Electron deps
-├── cli/    # @wpsync/cli  — bin: wpsync (commander)
-└── gui/    # @wpsync/gui  — Electron main + React renderer (Vite)
+├── core/            # @wpsync/core — sync library, no CLI/server deps
+├── cli/             # @wpsync/cli  — bin: wpsync (commander)
+└── gui/
+    ├── server/      # Express backend + SSE hub
+    └── client/      # React 18 + Vite frontend
 test/
 ├── fixtures/wordpress/   # docker-compose.yml + wp-init.sh
 └── integration/          # cross-package end-to-end tests
 ```
 
-The core library is the public API; CLI and GUI are thin shells on top of it. If you're contributing, start by reading `packages/core/src/index.ts`.
+The core library is the public API; CLI and GUI server are thin shells on top of it. If you're contributing, start by reading `packages/core/src/index.ts`.
 
 ### GUI dev mode
 
 ```bash
-pnpm --filter @wpsync/gui dev       # Vite + Electron with hot-reload
-pnpm --filter @wpsync/gui build     # production tsc + vite build
-pnpm --filter @wpsync/gui start     # run the built app
+pnpm --filter @wpsync/gui dev          # Express (4319) + Vite (5173) concurrently
+pnpm --filter @wpsync/gui dev:server   # backend only
+pnpm --filter @wpsync/gui dev:client   # Vite only
+pnpm --filter @wpsync/gui build        # tsc -b + vite build → dist-server + dist-client
+pnpm --filter @wpsync/gui start        # production: Express serves built bundle + API on one port
+pnpm --filter @wpsync/gui typecheck    # tsc --noEmit on both server and client
 ```
 
-The GUI's main process imports `@wpsync/core` directly and exposes a typed bridge to the renderer via `contextBridge`. There is no subprocess or stdin/stdout IPC between the renderer and the sync logic — only Electron's main↔renderer message channel.
-
-### Building installers
-
-```bash
-pnpm --filter @wpsync/gui dist        # bundle for the host platform → packages/gui/release/
-pnpm --filter @wpsync/gui dist:win    # Windows NSIS installer
-pnpm --filter @wpsync/gui dist:mac    # macOS DMG (Mac only)
-pnpm --filter @wpsync/gui dist:linux  # Linux AppImage
-```
-
-> **Windows note:** the `dist:win` script runs a tiny shim that wraps the bundled 7-Zip and skips the macOS-only entries inside the code-signing toolchain archive (which would otherwise need *Developer Mode* or admin to extract). The shim is built from a C# source file using `csc.exe` from .NET Framework 4 — present on every Windows install since Windows 8, no extra tooling required.
+In dev, Vite proxies `/api/*` to Express on `http://127.0.0.1:4319`, so the React code always uses relative URLs. Server-Sent Events stream over `/api/events`.
 
 ## Testing
 
 ### Unit tests
 
 ```bash
-pnpm -r test                          # all packages
+pnpm test                             # all packages
 pnpm --filter @wpsync/core test       # one package
 pnpm --filter @wpsync/core test -- --watch
 ```
@@ -357,22 +381,22 @@ The four tests, drive the actual `wpsync` binary as a child process:
 - **`conflict-halt.test.ts`** — pull a seed post, locally edit + bump mtime, mutate the same post server-side via `wp-cli`; asserts both `wpsync pull` and `wpsync push` exit 4, the local file is untouched, and the server's title is unchanged.
 - **`tombstone-no-force.test.ts`** — create a fresh post on the server, pull it, set `status: trash` locally, push; asserts the local file is gone, the server post is in `trash` status (not purged), and `wp post update --post_status=draft` successfully restores it — proving `force=true` was never sent.
 
-CI runs the Docker integration suite on `ubuntu-latest` only (Docker on Windows runners is flaky); unit tests run on Ubuntu, Windows, and macOS so `keytar` is exercised on every supported platform.
+CI runs the Docker integration suite on `ubuntu-latest` only (Docker on Windows runners is flaky); unit tests run on Ubuntu, Windows, and macOS.
 
 > **Note for non-SSL local fixtures:** WP 6.x disables Application Passwords on plain HTTP unless the site is marked as a local environment. `docker-compose.yml` sets `WP_ENVIRONMENT_TYPE=local` for that reason. `wp-init.mjs` also patches Apache's default `AllowOverride None` so WordPress's `.htaccess` `Authorization`-header rewrite actually fires.
 
 ## Project status
 
-`wpsync` v1 is **feature-complete and end-to-end-tested**. 109 unit tests + 4 integration tests pass on every run. The PRD §8 acceptance criteria — round-trip body integrity, ≥101-item pagination, conflict halt with exit 4 and zero writes, and tombstone DELETE without `force=true` — are all verified against a real Dockerised WordPress instance. The Windows installer build works without Developer Mode via a small 7za extract-time shim.
+`wpsync` v1 is **feature-complete and end-to-end-tested**. 124 unit tests + 4 integration tests pass on every run. The PRD §8 acceptance criteria — round-trip body integrity, ≥101-item pagination, conflict halt with exit 4 and zero writes, and tombstone DELETE without `force=true` — are all verified against a real Dockerised WordPress instance.
 
 | Milestone | Scope | State |
 |-----------|-------|-------|
 | **M1** | Skeleton: pnpm workspace, three packages, tsconfig refs, vitest, lint, CI | ✅ done |
-| **M2** | Read-only pull (CLI `init` + `auth set/test/clear` + `pull --full --type --dry-run`, auth via keytar with encrypted fallback) | ✅ done |
-| **M3** | Push with write-back and `mtime` adjustment (CLI `push --type --dry-run`); round-trip integrity verified end-to-end | ✅ done |
+| **M2** | Read-only pull (CLI `init` + `auth set/test/clear` + `pull --full --type --dry-run`) | ✅ done |
+| **M3** | Push with write-back and `mtime` adjustment; round-trip integrity verified end-to-end | ✅ done |
 | **M4** | Conflict detection (exit 4, zero writes), tombstone deletion (DELETE without `force=true`), `wpsync status`, `--force-pull` / `--force-push` | ✅ done |
-| **M5** | GUI shell — Electron 41 + React 19 + Vite 8: Setup wizard, Main view with progress events, IPC bridge over `contextBridge` | ✅ done |
-| **M6** | Per-slug ConflictModal, Settings screen (test creds, change password, switch folder, open config), electron-builder packaging (Windows/Mac/Linux configs) | ✅ done |
+| **M5** | GUI shell — Express backend + React 18 frontend (Vite), Setup wizard with server-side folder picker, Main view with SSE-driven progress | ✅ done |
+| **M6** | Per-slug ConflictModal, Settings screen (test creds, change password, switch folder, open config), production single-port deployment | ✅ done |
 | **M7** | Hardening: exponential-backoff retries with transient-network-error retry, Retry-After on 429, friendly 401/403/404/ECONNREFUSED/etc messages, push mtime race guard, dry-run output polish | ✅ done |
 | **Integration** | Dockerised WP fixture + 4 PRD §8 ACs (round-trip, ≥101-item pagination, conflict halt, no-force tombstone) | ✅ done |
 
@@ -393,7 +417,7 @@ node scripts/smoke-dryrun.mjs   # DRY RUN banner, breakdown summary, zero side-e
 
 ## Troubleshooting
 
-**`401 Unauthorized` when running `wpsync auth test`.** Confirm the Application Password is correct (no spaces — wp-admin shows it with spaces for readability, but they're optional), the user has `edit_posts`, and the site is reachable over HTTPS. On Windows, keychain entries are scoped to your Windows user profile; switching users invalidates them — re-run `wpsync auth set`.
+**`401 Unauthorized` when running `wpsync auth test`.** Confirm the Application Password is correct (no spaces — wp-admin shows it with spaces for readability, but they're optional), the user has `edit_posts`, and the site is reachable over HTTPS.
 
 **`wpsync pull` writes nothing even though I edited a post in wp-admin.** WordPress only updates `modified_gmt` when `post_content` or specific meta fields change; pure taxonomy edits via wp-admin can leave it unchanged. Pulling will catch the drift on the next content edit, or run `wpsync pull --full` to force a full re-pull.
 
@@ -401,4 +425,6 @@ node scripts/smoke-dryrun.mjs   # DRY RUN banner, breakdown summary, zero side-e
 
 **Conflict on a post I haven't touched locally.** Saving a file in your editor updates its `mtime` even if the bytes didn't change. Either re-pull with `--force-pull` to resync, or only save files when you actually edit them.
 
-**`keytar` fails to load on Linux.** Install `libsecret-1-dev` (Debian/Ubuntu) or `libsecret-devel` (Fedora). On headless servers, `wpsync` falls back to an encrypted `.wpsync/secrets.json` automatically — check the warning in the command output.
+**GUI: "EADDRINUSE" on port 4319 or 5173.** Another process is already bound to the port. Either close it or set `WPSYNC_PORT` in `packages/gui/.env` to a different number (the Vite dev server reads the same variable to wire its proxy correctly).
+
+**GUI: browser opens but `/api/...` calls return CORS errors.** You're probably running the Vite dev server without the Express backend. Start both with `pnpm --filter @wpsync/gui dev`, not `dev:client` alone.

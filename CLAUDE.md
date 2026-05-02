@@ -4,36 +4,39 @@ Engineering context for Claude sessions working on this repo. User-facing docs l
 
 ## What this project is
 
-`wpsync` — a CLI + Electron GUI tool that performs **incremental, bidirectional sync** between a WordPress site and a local directory via the WP REST API. Posts are stored on disk as raw `post_content` (Gutenberg block markup, shortcodes, HTML — verbatim, no transformation) wrapped in YAML front-matter, so they're editable in any text editor and Git-trackable.
+`wpsync` — a CLI + local web GUI that performs **incremental, bidirectional sync** between a WordPress site and a local directory via the WP REST API. Posts are stored on disk as raw `post_content` (Gutenberg block markup, shortcodes, HTML — verbatim, no transformation) wrapped in YAML front-matter, so they're editable in any text editor and Git-trackable.
 
 Single-user, single-site, scriptable. Greenfield TypeScript codebase.
 
 ## Source-of-truth documents
 
-- **PRD:** `C:\Users\jordi.cabot\Downloads\prd-wp-local-sync (1).md` — authoritative for endpoints, file format, CLI surface, GUI states, exit codes, conflict semantics, tombstone deletions, decision log. Read before making design decisions.
-- **Implementation plan:** `C:\Users\jordi.cabot\.claude\plans\indexed-launching-dragonfly.md` — workspace layout, module breakdown, milestones, open risks. The plan was approved on 2026-04-26.
+- **PRD:** `C:\Users\jordi.cabot\Downloads\prd-wp-local-sync (3).md` — authoritative for endpoints, file format, CLI surface, GUI states, exit codes, conflict semantics, tombstone deletions, decision log. Read before making design decisions.
+- **Original implementation plan:** `C:\Users\jordi.cabot\.claude\plans\indexed-launching-dragonfly.md` — covers M1–M7 of the original Electron build (approved 2026-04-26).
+- **GUI rewrite plan:** `C:\Users\jordi.cabot\.claude\plans\wild-coalescing-fountain.md` — covers the migration from Electron to Express+browser and the credentials simplification (approved and shipped 2026-05-02).
 
 ## Confirmed scope decisions (do not re-litigate)
 
-- Ship **CLI and Electron GUI together** in v1 — not phased.
+- Ship **CLI and local web GUI together** in v1 — not phased.
 - **pnpm workspaces** monorepo (not Turborepo, not single package).
 - Integration tests run against a **Docker Compose WordPress + MariaDB** fixture.
-- **TypeScript** across all packages; **commander** for CLI; **React + Vite** for GUI renderer; **vitest** as the only test runner.
-- **`keytar`** for credential storage, with an AES-GCM fallback when the OS keychain is unavailable.
+- **TypeScript** across all packages; **commander** for CLI; **Express** backend + **React 18 + Vite** frontend for the GUI; **vitest** as the only test runner.
+- Credentials live in **`<root>/.wpsync/credentials.json`** as plain JSON, file mode `600` on POSIX. No keychain, no encryption — gitignored by default.
 
 ## Workspace layout
 
 ```
 packages/
-├── core/           # @wpsync/core — sync library (no Node-CLI/Electron deps)
-├── cli/            # @wpsync/cli  — bin: wpsync (commander)
-└── gui/            # @wpsync/gui  — Electron main + React renderer
+├── core/            # @wpsync/core — sync library (no CLI/server deps)
+├── cli/             # @wpsync/cli  — bin: wpsync (commander)
+└── gui/
+    ├── server/      # Express backend + SSE hub (Node 20+)
+    └── client/      # React 18 frontend (Vite)
 test/
 ├── fixtures/wordpress/   # docker-compose.yml + wp-init.sh seeding 105 posts
 └── integration/          # cross-package end-to-end tests
 ```
 
-Composite TS project references (`tsconfig.base.json`) so GUI imports `@wpsync/core` as **TypeScript source**, not a built artefact (PRD §10 requires no subprocess/IPC between GUI and sync logic — main↔renderer IPC inside Electron is fine and unavoidable).
+Composite TS project references (`tsconfig.base.json`) so the GUI server imports `@wpsync/core` as **TypeScript source**, not a built artefact. The client has its own `tsconfig.json` (DOM lib, `noEmit`) used by Vite + the typecheck script.
 
 ## `@wpsync/core` public API (consumed identically by CLI and GUI)
 
@@ -51,7 +54,7 @@ export interface SyncEvents {
 }
 ```
 
-CLI and GUI both subscribe to `session.events`. CLI pipes them to stdout (verbose/quiet renderers); GUI re-emits over `ipcRenderer` from main → renderer.
+CLI and GUI both subscribe to `session.events`. CLI pipes them to stdout (verbose/quiet renderers); the Express backend forwards them to a single persistent SSE stream at `GET /api/events`, which the React client subscribes to via `EventSource` on mount.
 
 ## Module map (`packages/core/src/`)
 
@@ -69,6 +72,28 @@ CLI and GUI both subscribe to `session.events`. CLI pipes them to stdout (verbos
 | `tombstone.ts` | `status: trash` → `DELETE /wp/v2/<type>/<id>` **without `force`** (PRD §4.5, §8 AC) |
 | `events.ts` | Strongly-typed `EventEmitter<SyncEvents>` |
 | `errors.ts` | `AuthError`, `ConflictError(slugs)`, `TransportError`, `UsageError` |
+| `credentials.ts` | Simple file-backed store at `<root>/.wpsync/credentials.json` with mode `600` on POSIX. Plain JSON, no encryption |
+
+## GUI module map (`packages/gui/`)
+
+| File | Responsibility |
+|---|---|
+| `server/src/main.ts` | Bootstrap: load `.env` via `dotenv`, build app, `listen(127.0.0.1, PORT)`, optionally `open()` the browser in production |
+| `server/src/app.ts` | Express app factory; mounts `/api/*` routes; in production, also serves `dist-client/` static at `/`; in dev, leaves `/` to Vite |
+| `server/src/session.ts` | Owns one `SyncSession` per server lifetime; recreated on `init`/`adopt`. Forwards all `SyncEvents` to the SSE hub |
+| `server/src/sse.ts` | `SseHub` — single broadcaster; `GET /api/events` attaches a client, hub.broadcast writes `event:` + `data:` to every connected response |
+| `server/src/state.ts` | Last-used `rootDir` persisted at `~/.wpsync/app-state.json` (replaces Electron `userData`) |
+| `server/src/error-mapping.ts` | `AuthError`→401, `ConflictError`→409 + slugs, `TransportError`→502, `UsageError`→400, default→500. Mirrors CLI exit-code mapping |
+| `server/src/routes/config.ts` | `GET /api/state/last-root`, `GET /api/config?root=<path>` |
+| `server/src/routes/fs.ts` | `GET /api/fs/list?path=<abs>` (server-side directory picker; dirs only, dotfiles hidden), `GET /api/fs/home` |
+| `server/src/routes/probe.ts` | `POST /api/probe-url`, `POST /api/auth/test` |
+| `server/src/routes/init.ts` | `POST /api/init`, `POST /api/adopt` (writes `.wpsync/{config.toml,state.json,credentials.json}` + `.gitignore`) |
+| `server/src/routes/status.ts` | `GET /api/status` |
+| `server/src/routes/sync.ts` | `POST /api/pull`, `POST /api/push` — runs synchronously, response is the final `{ ok, written, skipped }` (or `{ ok:false, code, message, slugs? }`); progress events stream over the persistent SSE channel |
+| `server/src/routes/shell.ts` | `POST /api/config/open` — opens `config.toml` in the OS default editor via `open` npm package |
+| `client/src/lib/api.ts` | `fetch`-based client + `EventSource('/api/events')`. Exposes the same surface (`api.pull(...)`, `api.push(...)`, `api.onEvent(cb)`) the React screens already used in the Electron version |
+| `client/src/components/FolderPicker.tsx` | Directory-picker modal; calls `api.fsList(path)` to navigate, "Select this folder" returns absolute path |
+| `client/src/screens/{Setup,Main,Settings}.tsx` | Same React 18 components from before; only the folder-picker integration differs |
 
 ## Critical conventions and invariants
 
@@ -78,9 +103,10 @@ These are not negotiable — they come from the PRD and breaking them violates a
 2. **`context=edit` always** on posts/pages REST queries (PRD §6) — without it the API returns `content.rendered`, breaking round-trip.
 3. **DELETE never sends `force=true`.** Trashes only; permanent deletion is a wp-admin-only action. Verifiable by HTTP capture (PRD §4.5, §8 AC).
 4. **Plain `rm` is not a deletion.** A removed file is re-pulled on next sync. Tombstone deletion = set `status: trash` in front-matter and push.
-5. **Credentials never leave the keychain.** No password in `state.json`, `config.toml`, log output, or any Git-tracked file (PRD §8 AC).
+5. **Credentials never leave `<root>/.wpsync/credentials.json`.** No password in `state.json`, `config.toml`, log output, or any Git-tracked file (PRD §8 AC). The `.gitignore` written by `init` excludes `credentials.json`.
 6. **Conflict halt = zero writes.** When both sides have changed since `last_sync`, exit code 4, name affected slugs, no file or API writes happen.
 7. **Always print `<type>/<slug>`** in conflict reports — slugs can collide across `posts/` and `pages/`.
+8. **GUI server binds to `127.0.0.1` only.** Never `0.0.0.0`. Single-user local app.
 
 ## Time and mtime semantics
 
@@ -104,10 +130,10 @@ if (serverChanged && localChanged) → conflict
 
 ## Auth & secrets
 
-- `keytar` service `wpsync`, account `<site-url>`. Stores Application Password only.
+- `<root>/.wpsync/credentials.json`: `{ version: 1, entries: { [siteUrl]: password } }`. Plain JSON, mode `600` on POSIX (best-effort on Windows). The `init` flow appends `.wpsync/credentials.json` to the project's `.gitignore`.
 - `.wpsync/config.toml`: site URL, content dir, enabled types, **username** (Git-safe).
 - `.wpsync/state.json`: `last_sync`, schema version. Never credentials.
-- Fallback when keytar unavailable: `.wpsync/secrets.json`, `chmod 600`, AES-GCM with a key scrypt-derived from `os.hostname() + os.userInfo().username`. `init` writes a `.gitignore` that excludes `secrets.json`.
+- The GUI's per-installation settings live in `packages/gui/.env` (`WPSYNC_PORT`, `WPSYNC_DEV`, `WPSYNC_OPEN_BROWSER`); see `.env.example`.
 
 ## Front-matter schema (PRD §5)
 
@@ -137,42 +163,44 @@ parent: number          # pages only, 0 = top-level
 | 4 | Conflict detected — zero writes |
 | 5 | Network / transport error |
 
-Mapped in the CLI's top-level catch in `packages/cli/src/bin.ts`.
+Mapped in the CLI's top-level catch in `packages/cli/src/bin.ts` and mirrored in `packages/gui/server/src/error-mapping.ts` (with HTTP status codes 400/401/409/502/500).
 
 ## Test strategy
 
-- **Unit:** `packages/*/src/**/*.test.ts` with mocked `fetch`. Cover front-matter round-trip, mapper ID↔slug, conflict matrix (4 cases × force flags), Link-header pagination parser, exit-code mapping.
-- **Integration:** `test/integration/src/*.test.ts` — runs as a separate workspace package (`@wpsync/test-integration`) so it doesn't get pulled into `pnpm test`. `vitest globalSetup` calls `setupFixture()` from `test/fixtures/wordpress/wp-init.mjs` which: brings up `db` + `wp` via `docker compose`, polls `/wp-login.php` until reachable, runs `wp core install` (admin user `alice`, password `secret`), enables pretty permalinks, **patches `AllowOverride None` → `All` in the container's `apache2.conf`** so WP's `.htaccess` `Authorization`-header rewrite takes effect, generates an Application Password into `test/fixtures/wordpress/app-password.txt`, and seeds 105 posts with deterministic slugs (`wpsync-seed-001` … `wpsync-seed-105`). Tests drive the **real** `packages/cli/dist/bin.js` as a child process (same pattern as `scripts/smoke.mjs`). Vitest is configured single-fork, sequential — the fixture is shared. Four ACs:
+- **Unit:** `packages/*/src/**/*.test.ts` with mocked `fetch`. Cover front-matter round-trip, mapper ID↔slug, conflict matrix (4 cases × force flags), Link-header pagination parser, exit-code mapping. Plus `packages/gui/server/src/error-mapping.test.ts` (Express-side mapping) and `routes/fs.test.ts` (directory listing + path validation).
+- **Integration:** `test/integration/src/*.test.ts` — runs as a separate workspace package (`@wpsync/test-integration`) so it doesn't get pulled into `pnpm test`. `vitest globalSetup` calls `setupFixture()` from `test/fixtures/wordpress/wp-init.mjs` which: brings up `db` + `wp` via `docker compose`, polls `/wp-login.php` until reachable, runs `wp core install` (admin user `alice`, password `secret`), enables pretty permalinks, **patches `AllowOverride None` → `All` in the container's `apache2.conf`** so WP's `.htaccess` `Authorization`-header rewrite takes effect, generates an Application Password into `test/fixtures/wordpress/app-password.txt`, and seeds 105 posts with deterministic slugs (`wpsync-seed-001` … `wpsync-seed-105`). Tests drive the **real** `packages/cli/dist/bin.js` as a child process. Vitest is configured single-fork, sequential — the fixture is shared. Four ACs:
   - `pull-roundtrip.test.ts` — pull a seed post, edit body, push, full-pull again, assert post-push body == post-pull body
   - `pull-pagination.test.ts` — fresh init + `pull --full --type post`, assert ≥101 seed files in `posts/` (the per_page=100 cap means this requires ≥2 page fetches)
   - `conflict-halt.test.ts` — pull a seed post, edit local + bump mtime, mutate server-side via `wp-cli`, assert `pull` and `push` both exit 4, the local file is untouched, and the server's title hasn't changed
   - `tombstone-no-force.test.ts` — create a fresh `wpsync-tomb-<uuid>` server-side, pull, set `status: trash` locally, push, assert local file gone + server post in `trash` status, then `wp post update --post_status=draft` succeeds (proving the row wasn't `force`-deleted)
-- **CI:** Docker integration runs on `ubuntu-latest` only (Windows runners are flaky for Docker); unit tests on `{ubuntu, windows, macos}` matrix to cover `keytar`.
+- **End-to-end smokes** (mocked WP server, drive the actual CLI binary): `node scripts/smoke.mjs` (init, pull, push, conflict halt, force-pull, tombstone) and `node scripts/smoke-dryrun.mjs` (DRY RUN banner, breakdown summary, zero side-effect guarantee).
+- **CI:** Docker integration runs on `ubuntu-latest` only (Windows runners are flaky for Docker); unit tests on `{ubuntu, windows, macos}` matrix.
 
 ## Implementation milestones
 
 1. ✅ **M1 — Skeleton.** pnpm workspace, three packages, tsconfig refs, vitest, lint, CI green.
-2. ✅ **M2 — Read-only pull.** Core: errors, events (TypedEmitter over a `type` alias, not `interface`), types, paths, frontmatter (YAML codec with `schema: 'core'` so date strings stay strings), state (TOML config, atomic temp+rename), credentials (keytar + AES-GCM file fallback), rest-client (Basic Auth, `context=edit`, dual-strategy paginator: Link header → X-WP-TotalPages, retry-once on 5xx **for GETs only**), taxonomy-cache, mapper, pull (with `modified_after` and Z-suffix appending; aligns file `mtime` to server `modified_gmt` after each write so a subsequent push is a no-op), session. CLI: `commander`-driven bin with `init` / `auth set|test|clear` / `pull --full --type --dry-run`, exit-code mapping, friendly "no config" error.
-3. ✅ **M3 — Push.** `rest-client.createItem`/`updateItem` (POST, **no retry** because non-idempotent), `taxonomy-cache.idBySlug`, `mapper.frontmatterToPayload` (UsageError on unknown taxonomy slug), `push.ts` (walks `posts/`+`pages/`, classifies create/update/skip with 2-second mtime tolerance, writes back front-matter, `fs.utimes` mtime to server `modified_gmt`), CLI `push --type --dry-run`. End-to-end smoke at `scripts/smoke.mjs` covers idle push no-op, edit-and-push, re-push no-op, and pull→push→pull byte-identity (PRD §8 round-trip AC).
-4. ✅ **M4 — Conflict + tombstone + status.** `conflict.ts` (pure detector with 2-second `mtime` tolerance), `rest-client.deleteItem` (DELETE without `force=true`, no retry — never sends `force=true` is verified by URL inspection), tombstone branch in `push.ts` (`status: trash` → DELETE then `fs.unlink`; no-id trash just unlinks), conflict pre-pass in `pull.ts` (buffers all items, halts before any writes), conflict pre-pass in `push.ts` (uses listing `modified_after=last_sync` to detect server-side changes), `status.ts` aggregating per-slug `pending-pull`/`pending-push`/`conflict`/`tombstone`/`new-local`/`up-to-date`, CLI `status` command + `--force-pull` / `--force-push`. **bin.ts uses `process.exitCode` instead of `process.exit()`** — `process.exit()` was racing libuv async handles on Node 25 / Windows and crashing with `UV_HANDLE_CLOSING` assertions.
-5. ✅ **M5 — GUI shell.** Electron 41 + React 19 + Vite 8. `packages/gui/electron/main.ts` opens a `BrowserWindow` (loads `http://localhost:5173` in dev with retry-on-connection-refused, `file://` to `dist-renderer/index.html` in prod). `electron/preload.ts` exposes a typed `window.wpsync` API via `contextBridge` (no `nodeIntegration`). `electron/sync-bridge.ts` wires `ipcMain.handle()` calls into a shared `SyncSession`, forwards `SyncEvents` to the renderer over `webContents.send('wpsync:event', ...)`, and persists the last-used `rootDir` in `app.getPath('userData')/wpsync-app.json`. Renderer (`src/`): React 19 with `App.tsx` routing between `Setup` and `Main`, `Setup.tsx` running the URL probe → auth check → init flow, `Main.tsx` rendering counts + Pull/Push + force buttons + an event-driven activity log. **Dual tsconfig**: `tsconfig.json` for Electron (NodeNext, composite, refs to `core`); `tsconfig.renderer.json` (DOM lib, `react-jsx`, `noEmit`, used by Vite and the typecheck script). Root `pnpm build` now does `tsc -b && pnpm --filter @wpsync/gui build:renderer` to cover both.
-6. ✅ **M6 — Conflict modal + Settings + packaging.** Core: `ConflictResolution` = `'keep-local' | 'keep-server' | 'skip'`; pull and push accept a `resolutions: Record<string, ConflictResolution>` map. Conflict halt only fires for unresolved slugs. Pull writes only when resolution is `keep-server` (or no conflict, or `forcePull`); push only sends when resolution is `keep-local` (or no conflict, or `forcePush`). `keep-server`/`skip` slugs in pull and `keep-local`/`skip` in push emit `action: 'skip'`. Renderer: `ConflictModal` lists each affected `<type>/<slug>` with three radio choices and a bulk-apply row; the Apply handler runs pull then push with the same resolutions map. `Settings` screen wired in via a gear button in the Main header — covers credential test, password update, "Open config.toml" (uses `shell.openPath`), and folder switch via the existing folder picker. `electron-builder` config in `packages/gui/package.json` covers Windows (NSIS), Mac (DMG), and Linux (AppImage) targets with `asarUnpack` for `keytar` and `@iarna/toml` so their native + dependency resolution survives the asar bundling. `dist`, `dist:win`, `dist:mac`, `dist:linux` scripts.
-7. ✅ **M7 — Hardening.** `rest-client.request` now does up to **2 retries with exponential backoff + jitter** (250 ms → 500 ms → 1000 ms, capped at 4 s) on 5xx **and** transient network errors (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EAI_AGAIN`, `EPIPE`, `UND_ERR_*`, plus a "fetch failed"/"socket hang up" fallback). 429 responses honor the `Retry-After` header. Writes (POST/DELETE) still get zero retries to avoid duplicate creates. Better error messages: 401 hints "Application Password may be wrong or revoked — `wpsync auth set`"; 403 hints `edit_posts` capability; 404 on `/wp-json/` calls out REST API not enabled / wrong URL; ECONNREFUSED/ENOTFOUND/ETIMEDOUT each get a tailored sentence. Push has a **mtime race guard**: each candidate is re-stat'd just before sending; if mtime changed (editor mid-save) or the file disappeared, that slug is logged and skipped (`action: 'skip'`) so the user can re-run cleanly. CLI dry-run polish: explicit "DRY RUN — no files will be written / nothing will be sent" banner, `[DRY] [i/n] slug: would <action>` per-item lines under `--verbose`, and a per-action breakdown summary (`Would pull N items (created X, updated Y, skipped Z)`). Dry-run smoke at `scripts/smoke-dryrun.mjs` asserts the banner, the verb shift, and zero POST/DELETE traffic during a dry-run push. Pull's `session.pull` already skipped `saveState` under dry-run; push's `last_sync` bump is also gated on `!dryRun`.
+2. ✅ **M2 — Read-only pull.** Core: errors, events, types, paths, frontmatter, state, credentials, rest-client, taxonomy-cache, mapper, pull, session. CLI: `commander`-driven bin with `init` / `auth set|test|clear` / `pull --full --type --dry-run`.
+3. ✅ **M3 — Push.** `rest-client.createItem`/`updateItem`, `taxonomy-cache.idBySlug`, `mapper.frontmatterToPayload`, `push.ts` (walks `posts/`+`pages/`, classifies create/update/skip with 2-second mtime tolerance, writes back front-matter, `fs.utimes` mtime to server `modified_gmt`), CLI `push --type --dry-run`. End-to-end smoke at `scripts/smoke.mjs` covers idle push no-op, edit-and-push, re-push no-op, and pull→push→pull byte-identity.
+4. ✅ **M4 — Conflict + tombstone + status.** `conflict.ts`, `rest-client.deleteItem`, tombstone branch in `push.ts`, conflict pre-pass in `pull.ts` and `push.ts`, `status.ts`, CLI `status` command + `--force-pull` / `--force-push`. **bin.ts uses `process.exitCode` instead of `process.exit()`** to avoid `UV_HANDLE_CLOSING` races on Node 25 / Windows.
+5. ✅ **M5 — GUI shell.** Express 4 + React 18 + Vite 6. `packages/gui/server/src/main.ts` boots an Express app on `127.0.0.1:4319` (configurable via `WPSYNC_PORT`); `app.ts` mounts `/api/*` routes and a single SSE stream at `/api/events`; `session.ts` owns one `SyncSession` per server lifetime and forwards events to the SSE hub. `state.ts` persists last-used `rootDir` to `~/.wpsync/app-state.json`. Renderer (`client/src/`): React 18 with `App.tsx` routing between `Setup` and `Main`, `Setup.tsx` running URL-probe → auth-test → init flow with a server-side `FolderPicker` modal (no native dialog), `Main.tsx` rendering counts + Pull/Push + force buttons + an event-driven activity log (subscribes to `EventSource('/api/events')`). Vite proxies `/api/*` → `http://127.0.0.1:4319` in dev so the client uses relative URLs everywhere.
+6. ✅ **M6 — Conflict modal + Settings + production deployment.** Core: `ConflictResolution` = `'keep-local' | 'keep-server' | 'skip'`; pull and push accept a `resolutions: Record<string, ConflictResolution>` map. Conflict halt only fires for unresolved slugs. Renderer: `ConflictModal` lists each affected `<type>/<slug>` with three radio choices; the Apply handler runs pull then push with the same resolutions map. `Settings` screen wired in via a gear button — covers credential test, password update, "Open `config.toml`" (`POST /api/config/open` → `open` npm package), and folder switch via the same `FolderPicker` modal. Production: `pnpm --filter @wpsync/gui build` does `tsc -b server/tsconfig.json && vite build --config client/vite.config.ts`; `pnpm --filter @wpsync/gui start` runs `node dist-server/main.js` which serves the built client at `/` and the API at `/api/*` on the same port.
+7. ✅ **M7 — Hardening.** `rest-client.request` does up to **2 retries with exponential backoff + jitter** (250 ms → 500 ms → 1000 ms, capped at 4 s) on 5xx **and** transient network errors (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EAI_AGAIN`, `EPIPE`, `UND_ERR_*`, plus a "fetch failed"/"socket hang up" fallback). 429 responses honor the `Retry-After` header. Writes (POST/DELETE) still get zero retries to avoid duplicate creates. Better error messages: 401 hints "Application Password may be wrong or revoked — `wpsync auth set`"; 403 hints `edit_posts` capability; 404 on `/wp-json/` calls out REST API not enabled / wrong URL; ECONNREFUSED/ENOTFOUND/ETIMEDOUT each get a tailored sentence. Push has a **mtime race guard**: each candidate is re-stat'd just before sending; if mtime changed (editor mid-save) or the file disappeared, that slug is logged and skipped. CLI dry-run polish: explicit "DRY RUN — no files will be written / nothing will be sent" banner, `[DRY] [i/n] slug: would <action>` per-item lines under `--verbose`, and a per-action breakdown summary. Dry-run smoke at `scripts/smoke-dryrun.mjs` asserts the banner, the verb shift, and zero POST/DELETE traffic during a dry-run push.
 
-**Current status:** v1 feature-complete (M1–M7) **plus** the four PRD §8 integration tests are now wired up and green. 109 unit tests + 4 integration tests pass. `pnpm test:integration` brings up a Dockerised WordPress fixture (mariadb + wordpress:6.7-apache) on `http://localhost:8888`, drives the real `wpsync` binary against it, and verifies: round-trip body integrity, ≥101-item pagination across the per_page=100 boundary, conflict halt with exit 4 and zero writes, and tombstone DELETE without `force=true` (proven by restoring the trashed post). `pnpm --filter @wpsync/gui dist:win` still produces a working `wpsync Setup 0.0.0.exe` on Windows without admin or Developer Mode.
+**Current status:** v1 feature-complete (M1–M7) **plus** the four PRD §8 integration tests are wired up and green. **124 unit tests** + 4 integration tests pass. `pnpm test:integration` brings up a Dockerised WordPress fixture (mariadb + wordpress:6.7-apache) on `http://localhost:8888`, drives the real `wpsync` binary against it, and verifies: round-trip body integrity, ≥101-item pagination across the per_page=100 boundary, conflict halt with exit 4 and zero writes, and tombstone DELETE without `force=true` (proven by restoring the trashed post). `pnpm --filter @wpsync/gui dev` boots the Express server + Vite dev server with hot-reload; `start.bat` / `start.sh` wrap that flow with auto-install + browser-open.
 
 ## Common commands
 
 ```bash
 pnpm install                          # bootstrap workspace
-pnpm build                            # tsc -b across composite project refs (root)
+pnpm build                            # tsc -b across composite project refs + vite build
 pnpm test                             # vitest in every package (root → pnpm -r test)
 pnpm lint                             # eslint . from root
 pnpm --filter @wpsync/core test       # unit tests, one package
 pnpm --filter @wpsync/cli dev -- pull # run the CLI from source via tsx
 
-# End-to-end smoke: mocks WP, drives bin, asserts pull/push round-trip integrity
+# End-to-end smokes (mock WP, drive the real bin)
 node scripts/smoke.mjs
+node scripts/smoke-dryrun.mjs
 
 # Integration tests (Docker required)
 pnpm fixture:up                              # node test/fixtures/wordpress/wp-init.mjs — boots WP, installs, seeds 105 posts
@@ -183,35 +211,36 @@ pnpm fixture:reset                           # docker compose down -v — wipe a
 # WPSYNC_TEARDOWN=1 pnpm test:integration   # also tears the fixture down after the run (CI mode)
 
 # GUI
-pnpm --filter @wpsync/gui dev               # Vite + Electron concurrently with hot-reload
-pnpm --filter @wpsync/gui build             # tsc -b + vite build → dist-electron/ + dist-renderer/
-pnpm --filter @wpsync/gui start             # run the built Electron app
-pnpm --filter @wpsync/gui typecheck:renderer # tsc --noEmit on src/ via tsconfig.renderer.json
-pnpm --filter @wpsync/gui dist              # electron-builder for the host platform → packages/gui/release/
-pnpm --filter @wpsync/gui dist:win          # NSIS installer; runs the 7za-shim flow on Windows
-pnpm --filter @wpsync/gui dist:mac          # DMG (Mac only)
-pnpm --filter @wpsync/gui dist:linux        # AppImage
+pnpm --filter @wpsync/gui dev               # Express (4319) + Vite (5173) concurrently with hot-reload
+pnpm --filter @wpsync/gui dev:server        # backend only
+pnpm --filter @wpsync/gui dev:client        # Vite only
+pnpm --filter @wpsync/gui build             # tsc -b + vite build → dist-server/ + dist-client/
+pnpm --filter @wpsync/gui start             # production: node dist-server/main.js (single port serves built client + API)
+pnpm --filter @wpsync/gui typecheck         # tsc --noEmit for both server and client
 ```
+
+The user-facing launchers are at `packages/gui/start.bat` (Windows) and `packages/gui/start.sh` (POSIX). They `pnpm install`, set `WPSYNC_DEV=1`, and run `pnpm --filter @wpsync/gui dev` while opening the browser to `http://localhost:5173`.
 
 **Working-directory gotcha:** The Bash tool's cwd persists across commands. After any `cd` into a sub-package, prefix the next root-level command with `cd C:/repos/wordpress-file-sync &&` or root scripts (`pnpm build`, `pnpm test`) will run inside the sub-package.
 
 ## Open risks (flagged before code is written)
 
-1. **Front-matter mutation race.** Push rewrites the file after a successful API call; if an editor has unsaved changes, the next save loses our rewrite. Mitigation: detect `mtime` change between read and write inside `push`, abort that file with a clear error.
+1. **Front-matter mutation race.** Push rewrites the file after a successful API call; if an editor has unsaved changes, the next save loses our rewrite. Mitigation: `push.ts`'s mtime race guard (re-stat just before send; skip if mtime moved).
 2. **`modified_gmt` precision.** WP doesn't bump it for pure taxonomy edits via wp-admin. Mitigation: when pulling, compare `categories`/`tags` arrays too and treat drift as a server change.
-3. **`keytar` on Windows.** Credential Manager entries are bound to the Windows user profile; switching users invalidates them silently. Mitigation: always run `auth test` first on `pull`/`push`; on 401 with an existing entry, prompt re-auth.
-4. **Electron + workspace TS imports.** `keytar`'s native `.node` won't load from inside `app.asar` — `electron-builder` config needs `asarUnpack: ['**/keytar/**']` and the right `extraResources`.
-5. **`Link: rel="next"` stripped by reverse proxies.** Some WP installs sit behind proxies that drop the header. Mitigation: dual-strategy paginator probes once per session.
-6. **Slug collisions across types.** WP allows a post and a page sharing a slug. Disk is fine (`posts/` vs `pages/`), but the conflict reporter must always print `<type>/<slug>`.
-7. **electron-builder on Windows without Developer Mode — fixed via 7za shim.** The bundled `7zip-bin@5.2.0` ships 7-Zip 21.07, and `app-builder` (the Go binary electron-builder shells out to) calls it with `7za x ...` to extract the `winCodeSign-2.6.0.7z` cache. That archive contains macOS dylib symlinks; creating Windows symlinks requires admin or Developer Mode, so the extract dies with `Cannot create symbolic link : A required privilege is not held by the client`. The `-snld` flag was added in 7-Zip 22.00 but in modern versions it's specifically for *Windows* symlinks and doesn't bypass extraction of POSIX symlinks. The fix: `packages/gui/scripts/dist-win.mjs` compiles a tiny C# shim (`scripts/7za-shim/7za-shim.cs` → `7za.exe` via `csc.exe` from .NET Framework 4 — present on every Windows install since Win 8) that intercepts the `7za x ...` invocation, appends `-xr!darwin` (to skip the entire darwin subtree), and forwards everything else verbatim to the bundled 7za. The shim replaces the bundled `7za.exe` (idempotent — keeps the original as `real-7za.exe`) before electron-builder runs, so `builder-util`'s `SZA_PATH = await getPath7za()` env override picks it up. Adds a 150ms post-extract sleep to let Windows fully release file handles before app-builder renames the temp dir; without it the rename intermittently fails with "Access is denied".
+3. **`Link: rel="next"` stripped by reverse proxies.** Some WP installs sit behind proxies that drop the header. Mitigation: dual-strategy paginator probes once per session.
+4. **Slug collisions across types.** WP allows a post and a page sharing a slug. Disk is fine (`posts/` vs `pages/`), but the conflict reporter must always print `<type>/<slug>`.
+5. **Port collision on 4319 / 5173.** Two simultaneous wpsync instances would fight for ports. Mitigation: server uses `strictPort` so the second instance fails fast with a clear error; user sets `WPSYNC_PORT` in `.env` if they need a different number.
+6. **SSE reconnect on transient network blips.** `EventSource` reconnects automatically but doesn't replay missed events. For long pull/push runs, the activity log can drop a few items. Mitigation accepted: the final `done` event carries authoritative counts; the per-item log is best-effort UI feedback only.
 
 ## Style guardrails for this codebase
 
 - No comments unless the *why* is non-obvious (a hidden invariant, a workaround for a specific WP quirk). Don't restate what code already says.
 - No backwards-compat shims, deprecation aliases, or "removed:" marker comments — this is greenfield.
-- No error handling for impossible cases — trust internal code; validate only at the WP REST boundary and at user input (CLI args, GUI fields).
-- Keep `@wpsync/core` free of CLI- or Electron-specific dependencies. The events bus is the interface.
-- React renderer imports types from `react`, not the global `JSX` namespace — React 19 dropped the global ambient `JSX` declaration. Use `import type { JSX } from 'react'` when you need the return type explicitly, or just let TS infer.
+- No error handling for impossible cases — trust internal code; validate only at the WP REST boundary, the Express request boundary, and at user input (CLI args, GUI fields).
+- Keep `@wpsync/core` free of CLI- or server-specific dependencies. The events bus is the interface.
+- React renderer uses **React 18** types; import from `react` (no global ambient `JSX` namespace). Vite + Bundler module resolution; no `react-jsx-runtime` ceremony.
+- Express routes follow the same pattern: validate inputs at the top, call into core, map errors via `mapError(err)`, return `{ ok: false, code, message, slugs? }` on failure or domain-specific shape on success. Never let a stack trace leak to the client.
+- The persistent SSE hub is shared state. Don't try to scope it per-request; the design assumes a single browser tab is the consumer.
 
 ## User context
 

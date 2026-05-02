@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type JSX } from 'react';
 import { api } from '../lib/api';
+import { FolderPicker } from '../components/FolderPicker';
 
 interface Props {
   onConfigured: (rootDir: string) => void;
@@ -19,11 +20,7 @@ export function Setup({ onConfigured }: Props): JSX.Element {
   const [password, setPassword] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
   const [banner, setBanner] = useState<Banner | null>(null);
-
-  async function pickFolder(): Promise<void> {
-    const chosen = await api.pickFolder();
-    if (chosen) setRootDir(chosen);
-  }
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   async function submit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
@@ -76,12 +73,18 @@ export function Setup({ onConfigured }: Props): JSX.Element {
     phase === 'verifying-url' || phase === 'verifying-auth' || phase === 'writing';
 
   return (
+    <>
     <div className="setup">
-      <h2>Connect a WordPress site</h2>
-      <p className="lead">Mirror posts and pages into a local folder you can edit and version with Git.</p>
+      <span className="kicker">First edition · setup</span>
+      <h2>Connect a <em>WordPress</em> site</h2>
+      <p className="lead">
+        Mirror posts and pages into a local folder you can edit and version with Git. Round-trip is
+        verbatim — Gutenberg block markers, shortcodes, and HTML are preserved byte-for-byte.
+      </p>
 
       <form onSubmit={submit}>
         <div className="field">
+          <span className="field-num">№ 01</span>
           <label htmlFor="siteUrl">Site URL</label>
           <input
             id="siteUrl"
@@ -96,6 +99,7 @@ export function Setup({ onConfigured }: Props): JSX.Element {
         </div>
 
         <div className="field">
+          <span className="field-num">№ 02</span>
           <label htmlFor="rootDir">Content folder</label>
           <div className="field-row">
             <input
@@ -105,16 +109,16 @@ export function Setup({ onConfigured }: Props): JSX.Element {
               value={rootDir}
               onChange={(e) => setRootDir(e.target.value)}
               disabled={busy}
-              readOnly
             />
-            <button type="button" onClick={pickFolder} disabled={busy}>
-              Browse…
+            <button type="button" className="smallcaps" onClick={() => setPickerOpen(true)} disabled={busy}>
+              Browse
             </button>
           </div>
           <div className="hint">Posts will live in <code>posts/</code> and pages in <code>pages/</code> under this folder.</div>
         </div>
 
         <div className="field">
+          <span className="field-num">№ 03</span>
           <label htmlFor="username">WordPress username</label>
           <input
             id="username"
@@ -126,6 +130,7 @@ export function Setup({ onConfigured }: Props): JSX.Element {
         </div>
 
         <div className="field">
+          <span className="field-num">№ 04</span>
           <label htmlFor="password">Application Password</label>
           <input
             id="password"
@@ -146,10 +151,21 @@ export function Setup({ onConfigured }: Props): JSX.Element {
             {phase === 'verifying-url' && 'Verifying site…'}
             {phase === 'verifying-auth' && 'Authenticating…'}
             {phase === 'writing' && 'Writing config…'}
-            {(phase === 'idle' || phase === 'error' || phase === 'done') && 'Connect and pull'}
+            {(phase === 'idle' || phase === 'error' || phase === 'done') && 'Connect & pull →'}
           </button>
         </div>
       </form>
     </div>
+    {pickerOpen && (
+      <FolderPicker
+        initialPath={rootDir || null}
+        onCancel={() => setPickerOpen(false)}
+        onPick={(p) => {
+          setRootDir(p);
+          setPickerOpen(false);
+        }}
+      />
+    )}
+    </>
   );
 }

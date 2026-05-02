@@ -14,7 +14,7 @@ import {
 import { prompt, promptHidden } from '../prompt.js';
 import { resolveRootDir, type GlobalOpts } from '../context.js';
 
-const GITIGNORE_LINE = '.wpsync/secrets.json';
+const GITIGNORE_LINE = '.wpsync/credentials.json';
 
 export interface InitOpts extends GlobalOpts {
   siteUrl?: string;
@@ -80,13 +80,12 @@ export async function initCommand(opts: InitOpts): Promise<void> {
 
   const store = createCredentialStore(rootDir);
   await store.set(siteUrl, password);
-  const backend = await store.backendName();
 
   await ensureGitignore(rootDir);
 
   if (!opts.quiet) {
     console.log(`Wrote .wpsync/config.toml and .wpsync/state.json under ${rootDir}.`);
-    console.log(`Credentials stored in ${backend === 'keychain' ? 'OS keychain' : 'encrypted .wpsync/secrets.json'}.`);
+    console.log('Credentials stored in .wpsync/credentials.json (mode 600).');
     console.log('Next: `wpsync pull` to mirror your site locally.');
   }
 }

@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import { api } from '../lib/api';
+import { FolderPicker } from '../components/FolderPicker';
 
 interface Props {
   rootDir: string;
@@ -18,6 +19,7 @@ export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }:
   const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   async function testCredentials(): Promise<void> {
     setBusy(true);
@@ -66,9 +68,7 @@ export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }:
     if (!r.ok) setBanner({ kind: 'bad', text: r.message });
   }
 
-  async function pickAndSwitch(): Promise<void> {
-    const chosen = await api.pickFolder();
-    if (!chosen) return;
+  async function trySwitchTo(chosen: string): Promise<void> {
     setBusy(true);
     const check = await api.checkConfig(chosen);
     if (check.configured) {
@@ -89,29 +89,39 @@ export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }:
 
   return (
     <>
-      <div className="header">
-        <div>
-          <h1>Settings</h1>
-          <div className="meta">{siteUrl}</div>
+      <header className="masthead">
+        <div className="masthead-top">
+          <span className="vol">Editorial · Settings</span>
+          <button className="ghost" onClick={onBack}>← Back to the press floor</button>
         </div>
-        <button onClick={onBack}>← Back</button>
-      </div>
+        <h1 className="wordmark">
+          <em style={{ fontStyle: 'italic', fontVariationSettings: "'opsz' 144, 'SOFT' 60, 'WONK' 1" }}>Settings</em>
+        </h1>
+        <div className="subtitle-row">
+          <div className="subtitle">
+            <strong>{siteUrl}</strong>
+          </div>
+        </div>
+        <div className="masthead-rule" />
+      </header>
 
       <div className="content">
         <div className="settings-grid">
           <div className="panel">
-            <h3>Site</h3>
+            <span className="kicker">Imprint</span>
+            <h3>Site &amp; Folder</h3>
+            <p>The colophon — what gets printed on every page.</p>
             <div className="kv">
               <div>Site URL</div>
-              <div className="mono">{siteUrl}</div>
+              <div>{siteUrl}</div>
               <div>Username</div>
-              <div className="mono">{username}</div>
-              <div>Content folder</div>
-              <div className="mono">{rootDir}</div>
+              <div>{username}</div>
+              <div>Folder</div>
+              <div>{rootDir}</div>
             </div>
-            <div className="actions" style={{ marginTop: 12 }}>
-              <button onClick={pickAndSwitch} disabled={busy}>
-                Switch folder…
+            <div className="actions">
+              <button onClick={() => setPickerOpen(true)} disabled={busy}>
+                Switch folder
               </button>
               <button onClick={openConfig} disabled={busy}>
                 Open config.toml
@@ -120,17 +130,18 @@ export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }:
           </div>
 
           <div className="panel">
+            <span className="kicker">Plate &amp; Key</span>
             <h3>Credentials</h3>
-            <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: 13 }}>
-              The Application Password is stored in the OS keychain (or, if unavailable, an
-              encrypted <code>.wpsync/secrets.json</code>).
+            <p>
+              The Application Password is stored in <code>.wpsync/credentials.json</code> with file
+              mode 600 (POSIX). It is gitignored by default.
             </p>
-            <div className="actions" style={{ marginBottom: 12 }}>
+            <div className="actions" style={{ marginTop: 4, marginBottom: 4 }}>
               <button onClick={testCredentials} disabled={busy}>
                 Test stored credentials
               </button>
             </div>
-            <div className="field">
+            <div className="field" style={{ margin: '20px 0 0' }}>
               <label htmlFor="newPassword">New Application Password</label>
               <input
                 id="newPassword"
@@ -148,8 +159,18 @@ export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }:
           </div>
         </div>
 
-        {banner && <div className={`banner ${banner.kind}`} style={{ marginTop: 16 }}>{banner.text}</div>}
+        {banner && <div className={`banner ${banner.kind}`} style={{ marginTop: 24 }}>{banner.text}</div>}
       </div>
+      {pickerOpen && (
+        <FolderPicker
+          initialPath={rootDir}
+          onCancel={() => setPickerOpen(false)}
+          onPick={(p) => {
+            setPickerOpen(false);
+            void trySwitchTo(p);
+          }}
+        />
+      )}
     </>
   );
 }

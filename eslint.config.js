@@ -6,8 +6,8 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
-      '**/dist-electron/**',
-      '**/dist-renderer/**',
+      '**/dist-server/**',
+      '**/dist-client/**',
       '**/node_modules/**',
       '**/coverage/**',
       '**/*.tsbuildinfo',
@@ -34,7 +34,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/gui/src/**/*.{ts,tsx}'],
+    files: ['packages/gui/client/src/**/*.{ts,tsx}'],
     languageOptions: {
       globals: { ...globals.browser },
     },

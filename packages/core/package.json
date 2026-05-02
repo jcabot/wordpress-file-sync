@@ -23,7 +23,6 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "keytar": "^7.9.0",
     "yaml": "^2.8.3"
   },
   "devDependencies": {

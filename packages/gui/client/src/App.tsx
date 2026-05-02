@@ -59,9 +59,7 @@ export function App(): JSX.Element {
   if (mode.kind === 'loading') {
     return (
       <div className="app">
-        <div className="content" style={{ color: 'var(--muted)' }}>
-          Loading…
-        </div>
+        <div className="splash">setting type</div>
       </div>
     );
   }

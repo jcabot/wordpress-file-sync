@@ -38,11 +38,8 @@ export async function authCommand(opts: AuthOpts): Promise<void> {
     if (finalUsername !== config.username) {
       await saveConfig(rootDir, { ...config, username: finalUsername });
     }
-    const backend = await store.backendName();
     if (!opts.quiet) {
-      console.log(
-        `Stored in ${backend === 'keychain' ? 'OS keychain' : 'encrypted .wpsync/secrets.json'}.`,
-      );
+      console.log('Stored in .wpsync/credentials.json (mode 600).');
       console.log(`Authenticated as "${me.slug}" (user id ${me.id}).`);
     }
     return;
