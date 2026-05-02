@@ -26,6 +26,18 @@ function fakeRest(categories: TaxonomyTerm[], tags: TaxonomyTerm[]): RestClient 
         for (const t of type === 'categories' ? categories : tags) yield t;
       })(),
     getMe: async () => ({ id: 0, slug: '' }),
+    createItem: async () => {
+      throw new Error('not used');
+    },
+    updateItem: async () => {
+      throw new Error('not used');
+    },
+    deleteItem: async () => {
+      throw new Error('not used');
+    },
+    getItem: async () => {
+      throw new Error('not used');
+    },
   };
 }
 
@@ -61,6 +73,18 @@ describe('taxonomy-cache', () => {
       countItems: async () => 0,
       listTaxonomy: listSpy as unknown as RestClient['listTaxonomy'],
       getMe: async () => ({ id: 0, slug: '' }),
+      createItem: async () => {
+        throw new Error('not used');
+      },
+      updateItem: async () => {
+        throw new Error('not used');
+      },
+      deleteItem: async () => {
+        throw new Error('not used');
+      },
+      getItem: async () => {
+        throw new Error('not used');
+      },
     };
     const cache = createTaxonomyCache(root, rest);
     await cache.slugById('categories', 1);
@@ -90,6 +114,18 @@ describe('taxonomy-cache', () => {
           }
         })(),
       getMe: async () => ({ id: 0, slug: '' }),
+      createItem: async () => {
+        throw new Error('not used');
+      },
+      updateItem: async () => {
+        throw new Error('not used');
+      },
+      deleteItem: async () => {
+        throw new Error('not used');
+      },
+      getItem: async () => {
+        throw new Error('not used');
+      },
     };
     const cache = createTaxonomyCache(root, rest);
     expect(await cache.idBySlug('categories', 'research')).toBe(7);

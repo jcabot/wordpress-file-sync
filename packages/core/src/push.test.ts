@@ -84,6 +84,27 @@ function fakeRest(over: Partial<RestClient> = {}): RestClient {
     deleteItem: async () => {
       throw new Error('deleteItem not stubbed');
     },
+    getItem: async () => {
+      throw new Error('getItem not stubbed');
+    },
+    ...over,
+  };
+}
+
+function baseRestItem(over: Partial<RestItem> = {}): RestItem {
+  return {
+    id: 1,
+    type: 'post',
+    slug: 'hello',
+    status: 'publish',
+    date_gmt: '2025-01-01T00:00:00',
+    modified_gmt: '2025-01-02T00:00:00',
+    title: { raw: 'Hello', rendered: '' },
+    content: { raw: '', rendered: '' },
+    excerpt: { raw: '', rendered: '' },
+    categories: [7],
+    tags: [],
+    featured_media: 0,
     ...over,
   };
 }
@@ -133,7 +154,10 @@ describe('push', () => {
       featured_media: 0,
     }) as unknown as RestItem);
 
-    const rest = fakeRest({ updateItem: updateItem as RestClient['updateItem'] });
+    const rest = fakeRest({
+      getItem: async () => ({ ...baseRestItem(), modified_gmt: '2025-01-02T00:00:00' }),
+      updateItem: updateItem as RestClient['updateItem'],
+    });
     const { events, items } = makeEvents();
     const result = await push(
       { rootDir: root, config, rest, taxonomy, events },
@@ -213,7 +237,10 @@ describe('push', () => {
       featured_media: 0,
     }) as unknown as RestItem);
 
-    const rest = fakeRest({ updateItem: updateItem as RestClient['updateItem'] });
+    const rest = fakeRest({
+      getItem: async () => ({ ...baseRestItem(), modified_gmt: '2025-01-02T00:00:00' }),
+      updateItem: updateItem as RestClient['updateItem'],
+    });
     const { events: events1 } = makeEvents();
     await push({ rootDir: root, config, rest, taxonomy, events: events1 }, { type: 'post' });
 
@@ -234,7 +261,10 @@ describe('push', () => {
     await writePostFile(meta, '<p>edited</p>', localMtime);
 
     const updateItem = vi.fn();
-    const rest = fakeRest({ updateItem: updateItem as RestClient['updateItem'] });
+    const rest = fakeRest({
+      getItem: async () => ({ ...baseRestItem(), modified_gmt: '2025-01-02T00:00:00' }),
+      updateItem: updateItem as RestClient['updateItem'],
+    });
     const { events, items } = makeEvents();
     const result = await push(
       { rootDir: root, config, rest, taxonomy, events },
@@ -300,23 +330,7 @@ describe('push', () => {
 
     const updateItem = vi.fn();
     const rest = fakeRest({
-      listItems: () =>
-        (async function* () {
-          yield {
-            id: 1,
-            type: 'post',
-            slug: 'hello',
-            status: 'publish',
-            date_gmt: '2025-01-01T00:00:00',
-            modified_gmt: '2025-04-01T00:00:00', // server has changed too
-            title: { raw: 'Hello', rendered: '' },
-            content: { raw: '', rendered: '' },
-            excerpt: { raw: '', rendered: '' },
-            categories: [7],
-            tags: [],
-            featured_media: 0,
-          } as RestItem;
-        })(),
+      getItem: async () => ({ ...baseRestItem(), modified_gmt: '2025-04-01T00:00:00' }),
       updateItem: updateItem as RestClient['updateItem'],
     });
     const { events } = makeEvents();
@@ -348,23 +362,7 @@ describe('push', () => {
     }) as unknown as RestItem);
 
     const rest = fakeRest({
-      listItems: () =>
-        (async function* () {
-          yield {
-            id: 1,
-            type: 'post',
-            slug: 'hello',
-            status: 'publish',
-            date_gmt: '2025-01-01T00:00:00',
-            modified_gmt: '2025-04-01T00:00:00',
-            title: { raw: '', rendered: '' },
-            content: { raw: '', rendered: '' },
-            excerpt: { raw: '', rendered: '' },
-            categories: [7],
-            tags: [],
-            featured_media: 0,
-          } as RestItem;
-        })(),
+      getItem: async () => ({ ...baseRestItem(), modified_gmt: '2025-04-01T00:00:00' }),
       updateItem: updateItem as RestClient['updateItem'],
     });
     const { events } = makeEvents();
@@ -383,23 +381,7 @@ describe('push', () => {
 
     const updateItem = vi.fn();
     const rest = fakeRest({
-      listItems: () =>
-        (async function* () {
-          yield {
-            id: 1,
-            type: 'post',
-            slug: 'hello',
-            status: 'publish',
-            date_gmt: '2025-01-01T00:00:00',
-            modified_gmt: '2025-04-01T00:00:00',
-            title: { raw: '', rendered: '' },
-            content: { raw: '', rendered: '' },
-            excerpt: { raw: '', rendered: '' },
-            categories: [7],
-            tags: [],
-            featured_media: 0,
-          } as RestItem;
-        })(),
+      getItem: async () => ({ ...baseRestItem(), modified_gmt: '2025-04-01T00:00:00' }),
       updateItem: updateItem as RestClient['updateItem'],
     });
     const { events, items } = makeEvents();
@@ -469,7 +451,10 @@ describe('push', () => {
     const path = await writePostFile(meta, '<p>edit</p>', localMtime);
 
     const updateItem = vi.fn();
-    const rest = fakeRest({ updateItem: updateItem as RestClient['updateItem'] });
+    const rest = fakeRest({
+      getItem: async () => ({ ...baseRestItem(), modified_gmt: '2025-01-02T00:00:00' }),
+      updateItem: updateItem as RestClient['updateItem'],
+    });
     const { events, items } = makeEvents();
 
     // Bump the file's mtime AFTER collectCandidates runs — but since collect

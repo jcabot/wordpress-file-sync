@@ -59,6 +59,11 @@ function fakeRest(itemsByType: { post?: RestItem[]; page?: RestItem[] }): RestCl
     countItems: async (type) => (itemsByType[type] ?? []).length,
     listTaxonomy: () => (async function* () {})(),
     getMe: async () => ({ id: 0, slug: '' }),
+    getItem: async (type, id) => {
+      const item = (itemsByType[type] ?? []).find((candidate) => candidate.id === id);
+      if (!item) throw new Error(`No fake ${type} item with id ${id}`);
+      return item;
+    },
   };
 }
 
@@ -182,7 +187,7 @@ describe('pull', () => {
       'post/supported:create',
       'post/workflow-draft:skip',
     ]);
-    expect(logEvents[0]).toMatchObject({
+    expect(logEvents.find((e) => e.level === 'warn')).toMatchObject({
       level: 'warn',
       msg: expect.stringContaining('Unsupported WordPress post status "archived"'),
     });

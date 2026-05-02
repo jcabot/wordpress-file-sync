@@ -12,6 +12,12 @@ export interface RestClientOptions {
 
 export interface ListItemsOptions {
   modifiedAfter?: string | null;
+  onPage?: (page: {
+    page: number;
+    items: number;
+    totalPages: number | null;
+    skipped?: boolean;
+  }) => void;
 }
 
 export interface RestClient {
@@ -22,9 +28,11 @@ export interface RestClient {
   createItem(type: PostType, payload: Record<string, unknown>): Promise<RestItem>;
   updateItem(type: PostType, id: number, payload: Record<string, unknown>): Promise<RestItem>;
   deleteItem(type: PostType, id: number): Promise<void>;
+  getItem(type: PostType, id: number): Promise<RestItem>;
 }
 
-const PER_PAGE = 100;
+const ITEM_PER_PAGE = 1;
+const TAXONOMY_PER_PAGE = 100;
 const DEFAULT_RETRIES = 2;
 const BASE_BACKOFF_MS = 250;
 const MAX_BACKOFF_MS = 4000;
@@ -74,6 +82,18 @@ function buildUrl(siteUrl: string, path: string, params: Record<string, string> 
     if (v !== '') url.searchParams.set(k, v);
   }
   return url;
+}
+
+function modifiedAfterRejected(err: unknown, modifiedAfter: string | null | undefined): boolean {
+  if (!modifiedAfter) return false;
+  if (!(err instanceof TransportError) || err.status !== 400) return false;
+  return /modified_after/i.test(err.message) && /(invalid|format|date|rest_invalid_param)/i.test(err.message);
+}
+
+function malformedRestPage(err: unknown): boolean {
+  if (!(err instanceof TransportError)) return false;
+  if (err.status !== 404 && err.status !== 502) return false;
+  return /Non-JSON|valid JSON|REST API/i.test(err.message);
 }
 
 async function delay(ms: number): Promise<void> {
@@ -283,6 +303,12 @@ async function parseJson<T>(res: Response, urlForError: string): Promise<T> {
 async function* paginatedGet<T>(
   getResponse: (url: string | URL) => Promise<Response>,
   initialUrl: URL,
+  onPage?: (page: {
+    page: number;
+    items: number;
+    totalPages: number | null;
+    skipped?: boolean;
+  }) => void,
 ): AsyncIterable<T> {
   let url: string | URL = initialUrl;
   let pageNum = 1;
@@ -290,8 +316,29 @@ async function* paginatedGet<T>(
   const baseUrl = new URL(initialUrl.toString());
 
   for (;;) {
-    const res = await getResponse(url);
-    const items = await parseJson<T[]>(res, url.toString());
+    let res: Response;
+    let items: T[];
+    try {
+      res = await getResponse(url);
+      items = await parseJson<T[]>(res, url.toString());
+    } catch (err) {
+      if (!malformedRestPage(err) || totalPages === null) throw err;
+      onPage?.({ page: pageNum, items: 0, totalPages, skipped: true });
+      pageNum += 1;
+      if (pageNum > totalPages) break;
+      const currentUrl = typeof url === 'string' ? url : url.toString();
+      const nextPageUrl: URL = new URL(currentUrl);
+      nextPageUrl.searchParams.set('page', String(pageNum));
+      url = nextPageUrl;
+      continue;
+    }
+
+    if (totalPages === null) {
+      const tp = res.headers.get('x-wp-totalpages');
+      totalPages = tp ? Number.parseInt(tp, 10) : null;
+    }
+    onPage?.({ page: pageNum, items: items.length, totalPages });
+
     for (const item of items) yield item;
 
     const nextFromLink = parseLinkNext(res.headers.get('link'));
@@ -301,10 +348,7 @@ async function* paginatedGet<T>(
       continue;
     }
 
-    if (totalPages === null) {
-      const tp = res.headers.get('x-wp-totalpages');
-      totalPages = tp ? Number.parseInt(tp, 10) : 1;
-    }
+    if (totalPages === null) totalPages = 1;
     pageNum += 1;
     if (pageNum > totalPages) break;
     const nextUrl = new URL(baseUrl.toString());
@@ -364,34 +408,91 @@ export function createRestClient(opts: RestClientOptions): RestClient {
   function listingParams(modifiedAfter: string | null | undefined): Record<string, string> {
     const params: Record<string, string> = {
       context: 'edit',
-      per_page: String(PER_PAGE),
+      per_page: String(ITEM_PER_PAGE),
       page: '1',
       orderby: 'modified',
       order: 'asc',
-      status: 'any',
     };
     if (modifiedAfter) params['modified_after'] = modifiedAfter;
     return params;
   }
 
+  interface ListingVariant {
+    modifiedAfter: string | null | undefined;
+  }
+
+  function nextListingVariant(
+    variant: ListingVariant,
+    err: unknown,
+  ): ListingVariant | null {
+    if (modifiedAfterRejected(err, variant.modifiedAfter)) {
+      return { ...variant, modifiedAfter: null };
+    }
+    return null;
+  }
+
   return {
     listItems(type, listOpts) {
-      const url = buildUrl(opts.siteUrl, endpointFor(type), listingParams(listOpts.modifiedAfter));
-      return paginatedGet<RestItem>((u) => send(u, { retry: true }), url);
+      const getItems = (variant: ListingVariant) => {
+        const url = buildUrl(
+          opts.siteUrl,
+          endpointFor(type),
+          listingParams(variant.modifiedAfter),
+        );
+        return paginatedGet<RestItem>((u) => send(u, { retry: true }), url, listOpts.onPage);
+      };
+      return (async function* () {
+        let variant: ListingVariant = {
+          modifiedAfter: listOpts.modifiedAfter,
+        };
+        const seen = new Set<string>();
+        for (;;) {
+          seen.add(variant.modifiedAfter ?? '');
+          try {
+            yield* getItems(variant);
+            return;
+          } catch (err) {
+            const next = nextListingVariant(variant, err);
+            const key = next?.modifiedAfter ?? '';
+            if (!next || seen.has(key)) throw err;
+            variant = next;
+          }
+        }
+      })();
     },
 
     async countItems(type, listOpts) {
-      const params = { ...listingParams(listOpts.modifiedAfter), per_page: '1' };
-      const url = buildUrl(opts.siteUrl, endpointFor(type), params);
-      const res = await send(url, { retry: true });
-      await res.text();
-      const total = res.headers.get('x-wp-total');
-      return total ? Number.parseInt(total, 10) : 0;
+      const count = async (variant: ListingVariant) => {
+        const params = {
+          ...listingParams(variant.modifiedAfter),
+          per_page: '1',
+        };
+        const url = buildUrl(opts.siteUrl, endpointFor(type), params);
+        const res = await send(url, { retry: true });
+        await res.text();
+        const total = res.headers.get('x-wp-total');
+        return total ? Number.parseInt(total, 10) : 0;
+      };
+      let variant: ListingVariant = {
+        modifiedAfter: listOpts.modifiedAfter,
+      };
+      const seen = new Set<string>();
+      for (;;) {
+        seen.add(variant.modifiedAfter ?? '');
+        try {
+          return await count(variant);
+        } catch (err) {
+          const next = nextListingVariant(variant, err);
+          const key = next?.modifiedAfter ?? '';
+          if (!next || seen.has(key)) throw err;
+          variant = next;
+        }
+      }
     },
 
     listTaxonomy(taxType) {
       const url = buildUrl(opts.siteUrl, taxType, {
-        per_page: String(PER_PAGE),
+        per_page: String(TAXONOMY_PER_PAGE),
         page: '1',
         orderby: 'id',
         order: 'asc',
@@ -434,6 +535,12 @@ export function createRestClient(opts: RestClientOptions): RestClient {
         retry: false,
       });
       await res.text();
+    },
+
+    async getItem(type, id) {
+      const url = buildUrl(opts.siteUrl, `${endpointFor(type)}/${id}`, { context: 'edit' });
+      const res = await send(url, { retry: true });
+      return parseJson<RestItem>(res, url.toString());
     },
   };
 }

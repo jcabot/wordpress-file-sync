@@ -94,9 +94,43 @@ export async function pull(deps: PullDeps, opts: PullOptions = {}): Promise<Pull
   // Buffer the listing so we can run a conflict pre-pass before any writes.
   const buffered: BufferedItem[] = [];
   for (const type of types) {
-    for await (const item of rest.listItems(type, { modifiedAfter })) {
+    let listed = 0;
+    events.emit('log', {
+      level: 'info',
+      msg: `Fetching published ${type === 'post' ? 'posts' : 'pages'} from WordPress...`,
+    });
+    for await (const item of rest.listItems(type, {
+      modifiedAfter,
+      onPage(page) {
+        if (page.skipped) {
+          events.emit('log', {
+            level: 'warn',
+            msg: `Skipped malformed WordPress REST page ${page.page} while fetching ${type === 'post' ? 'posts' : 'pages'}. Continuing with the next page.`,
+          });
+          return;
+        }
+        listed += page.items;
+        if (page.items > 0 && (page.page === 1 || page.page % 5 === 0)) {
+          const total = page.totalPages ? `/${page.totalPages}` : '';
+          events.emit('log', {
+            level: 'info',
+            msg: `Fetched ${listed} ${type === 'post' ? 'post' : 'page'} item(s) so far (REST page ${page.page}${total}).`,
+          });
+        }
+      },
+    })) {
       buffered.push({ type, item });
     }
+    if (listed === 0 && modifiedAfter) {
+      events.emit('log', {
+        level: 'info',
+        msg: `No published ${type === 'post' ? 'posts' : 'pages'} changed since the last sync.`,
+      });
+    }
+    events.emit('log', {
+      level: 'info',
+      msg: `Finished fetching ${listed} ${type === 'post' ? 'post' : 'page'} item(s).`,
+    });
   }
 
   const resolutions = opts.resolutions ?? {};

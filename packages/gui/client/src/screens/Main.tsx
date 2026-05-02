@@ -56,7 +56,7 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
       if (evt.type === 'item') {
         const it = evt.payload as ItemEvent;
         const total = it.total > 0 ? `/${it.total}` : '';
-        setProgress(`${it.op} ${it.index}${total} — ${it.slug}`);
+        setProgress(`${it.op} ${it.index}${total}: ${it.slug}`);
         appendLog(`[${it.op} ${it.index}${total}] ${it.slug}: ${it.action}`, `ev-${it.action}`);
       } else if (evt.type === 'done') {
         const d = evt.payload as DoneEvent;
@@ -91,11 +91,11 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
     }
   }
 
-  async function runPull(force = false): Promise<void> {
+  async function runPull(full = false): Promise<void> {
     setError(null);
     setPhase('pulling');
-    appendLog('Pull started…');
-    const r = await api.pull({ forcePull: force });
+    appendLog(full ? 'Pull all started...' : 'Pull started...');
+    const r = await api.pull({ full });
     setPhase('idle');
     if (r.ok) {
       appendLog(`Pull complete: ${r.written} item(s).`);
@@ -110,11 +110,11 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
     void refreshStatus();
   }
 
-  async function runPush(force = false): Promise<void> {
+  async function runPush(): Promise<void> {
     setError(null);
     setPhase('pushing');
-    appendLog('Push started…');
-    const r = await api.push({ forcePush: force });
+    appendLog('Push started...');
+    const r = await api.push({ forcePush: false });
     setPhase('idle');
     if (r.ok) {
       appendLog(`Push complete: ${r.written} item(s) written, ${r.skipped} skipped.`);
@@ -133,7 +133,7 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
     setConflictSlugs(null);
     setError(null);
     setPhase('pulling');
-    appendLog(`Applying resolutions for ${Object.keys(resolutions).length} conflict(s)…`);
+    appendLog(`Applying resolutions for ${Object.keys(resolutions).length} conflict(s)...`);
     const r1 = await api.pull({ resolutions });
     if (!r1.ok && r1.code !== 'conflict') {
       setError(`Resolve failed (pull): ${r1.message}`);
@@ -146,7 +146,7 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
     const r2 = await api.push({ resolutions });
     setPhase('idle');
     if (r2.ok) {
-      appendLog(`Resolutions applied.`);
+      appendLog('Resolutions applied.');
     } else {
       setError(`Resolve failed (push): ${r2.message}`);
       appendLog(`Resolve failed (push): ${r2.message}`, 'ev-error');
@@ -160,7 +160,7 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
     <>
       <header className="masthead">
         <div className="masthead-top">
-          <span className="vol">Vol. I · Letterpress Edition</span>
+          <span className="vol">WordPress file sync</span>
           <span className="dateline">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
         </div>
         <h1 className="wordmark">
@@ -169,11 +169,11 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
         <div className="subtitle-row">
           <div className="subtitle">
             <strong>{siteUrl}</strong>
-            <span style={{ margin: '0 10px', color: 'var(--ink-faint)' }}>·</span>
+            <span style={{ margin: '0 10px', color: 'var(--ink-faint)' }}>/</span>
             <span>{rootDir}</span>
           </div>
           <div className="subtitle" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <span>last impression: <strong>{lastSync ?? '—'}</strong></span>
+            <span>Last sync: <strong>{lastSync ?? 'not set'}</strong></span>
             <button className="smallcaps" onClick={onOpenSettings} aria-label="Settings">
               Settings
             </button>
@@ -187,15 +187,18 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
 
         <div className="actions-strip">
           <button className="primary" disabled={busy} onClick={() => runPull(false)}>
-            {phase === 'pulling' ? 'Pulling…' : '↓ Pull'}
+            {phase === 'pulling' ? 'Pulling...' : `Pull new changes since ${lastSync ?? 'the beginning'}`}
           </button>
-          <button disabled={busy} onClick={() => runPush(false)}>
-            {phase === 'pushing' ? 'Pushing…' : '↑ Push'}
+          <button disabled={busy} onClick={() => runPull(true)}>
+            Pull all
+          </button>
+          <button disabled={busy} onClick={() => runPush()}>
+            {phase === 'pushing' ? 'Pushing...' : 'Push'}
           </button>
           <button disabled={busy} onClick={() => void refreshStatus()}>
-            ⟳ Refresh
+            Refresh
           </button>
-          <div className="progress">{progress || (busy ? 'Setting type…' : 'At rest, awaiting press.')}</div>
+          <div className="progress">{progress || (busy ? 'Working...' : 'Ready.')}</div>
         </div>
 
         <div className="stats-inset">
@@ -207,37 +210,15 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
           <StatCell label="Up to date" value={counts.upToDate} kind="good" />
         </div>
 
-        <div className="columns">
-          <div className="column">
-            <span className="kicker">Section A</span>
-            <h3>The Press Floor</h3>
-            <p className="deck">Two motions sync your work. Pull brings the server's latest into your editor; push commits your edits back to the live site. Round-trip is byte-identical.</p>
-            <div className="actions">
-              <button disabled={busy} onClick={() => runPull(false)}>↓ Pull</button>
-              <button disabled={busy} onClick={() => runPush(false)}>↑ Push</button>
-            </div>
-          </div>
-
-          <div className="column">
-            <span className="kicker">Section B · Errata</span>
-            <h3>Force a direction</h3>
-            <p className="deck">When both sides have moved since the last sync, the press halts. Choose a winning direction here, or open the per-slug picker from the conflict modal.</p>
-            <div className="actions">
-              <button disabled={busy} onClick={() => runPull(true)}>↓ Force pull</button>
-              <button disabled={busy} onClick={() => runPush(true)}>↑ Force push</button>
-            </div>
-          </div>
-        </div>
-
         <section className="log-section">
-          <span className="kicker">Section C · Activity</span>
+          <span className="kicker">Activity</span>
           <div className="section-title">
-            <h3>Teletype</h3>
+            <h3>Sync log</h3>
             <span className="rule" />
             <span className="serial">{log.length} lines</span>
           </div>
           <div className="log">
-            {log.length === 0 && <div className="ts">No impressions yet. Press a key above to begin.</div>}
+            {log.length === 0 && <div className="ts">No activity yet. Start a pull, push, or refresh.</div>}
             {log.map((line, i) => (
               <div key={i}>
                 <span className="ts">{line.ts}</span>

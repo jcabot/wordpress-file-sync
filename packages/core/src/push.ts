@@ -6,7 +6,7 @@ import { decode, encode } from './frontmatter.js';
 import { frontmatterToPayload } from './mapper.js';
 import { typeDir } from './paths.js';
 import { loadState, saveState } from './state.js';
-import type { Config, FrontMatter, PostType, RestItem, State } from './types.js';
+import type { Config, FrontMatter, PostType, RestItem } from './types.js';
 import type { RestClient } from './rest-client.js';
 import type { TaxonomyCache } from './taxonomy-cache.js';
 import type { SyncEvents, TypedEmitter } from './events.js';
@@ -88,15 +88,16 @@ function classify(candidate: Candidate): Action {
 
 async function fetchServerMods(
   rest: RestClient,
-  types: PostType[],
-  state: State,
+  candidates: Candidate[],
 ): Promise<Map<number, string>> {
   const map = new Map<number, string>();
-  const modifiedAfter = state.last_sync ? appendZ(state.last_sync) : null;
-  for (const type of types) {
-    for await (const item of rest.listItems(type, { modifiedAfter })) {
-      map.set(item.id, item.modified_gmt);
-    }
+  for (const c of candidates) {
+    const id = c.meta.id;
+    if (id === undefined) continue;
+    if (c.meta.status === 'trash') continue;
+    if (!localChanged(c.fileMtimeMs, c.meta.modified_gmt)) continue;
+    const item = await rest.getItem(c.type, id);
+    map.set(id, item.modified_gmt);
   }
   return map;
 }
@@ -163,8 +164,7 @@ export async function push(deps: PushDeps, opts: PushOptions = {}): Promise<Push
   );
 
   if (needConflictCheck) {
-    const state = await loadState(rootDir);
-    const serverMods = await fetchServerMods(rest, types, state);
+    const serverMods = await fetchServerMods(rest, candidates);
     const conflicts = detectConflicts(candidates, serverMods);
     conflictSet = new Set(conflicts);
     if (!opts.forcePush) {

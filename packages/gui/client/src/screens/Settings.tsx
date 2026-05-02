@@ -92,7 +92,7 @@ export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }:
       <header className="masthead">
         <div className="masthead-top">
           <span className="vol">Editorial · Settings</span>
-          <button className="ghost" onClick={onBack}>← Back to the press floor</button>
+          <button className="ghost" onClick={onBack}>← Back to sync</button>
         </div>
         <h1 className="wordmark">
           <em style={{ fontStyle: 'italic', fontVariationSettings: "'opsz' 144, 'SOFT' 60, 'WONK' 1" }}>Settings</em>
@@ -108,9 +108,9 @@ export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }:
       <div className="content">
         <div className="settings-grid">
           <div className="panel">
-            <span className="kicker">Imprint</span>
+            <span className="kicker">Configuration</span>
             <h3>Site &amp; Folder</h3>
-            <p>The colophon — what gets printed on every page.</p>
+            <p>The WordPress site and local folder this app syncs.</p>
             <div className="kv">
               <div>Site URL</div>
               <div>{siteUrl}</div>
@@ -130,7 +130,7 @@ export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }:
           </div>
 
           <div className="panel">
-            <span className="kicker">Plate &amp; Key</span>
+            <span className="kicker">Credentials</span>
             <h3>Credentials</h3>
             <p>
               The Application Password is stored in <code>.wpsync/credentials.json</code> with file

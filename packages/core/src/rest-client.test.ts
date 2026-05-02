@@ -38,7 +38,8 @@ describe('rest-client', () => {
     const url = String(call?.[0]);
     expect(url).toContain('/wp-json/wp/v2/posts');
     expect(url).toContain('context=edit');
-    expect(url).toContain('per_page=100');
+    expect(url).toContain('per_page=1');
+    expect(url).not.toContain('status=any');
     const reqInit = call?.[1] as RequestInit;
     expect(reqInit.headers).toMatchObject({
       Authorization: 'Basic ' + Buffer.from('alice:pw').toString('base64'),
@@ -91,6 +92,51 @@ describe('rest-client', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     const lastCall = fetchImpl.mock.calls[2];
     expect(String(lastCall?.[0])).toContain('page=3');
+  });
+
+  it('skips a malformed listing page after pagination has started', async () => {
+    const html = '<link rel="preconnect" href="https://fonts.gstatic.com"><style>/* Divi */</style>';
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const page = new URL(url).searchParams.get('page');
+      if (page === '1') {
+        return makeJsonResponse([{ id: 1 }], {
+          'x-wp-totalpages': '3',
+          link: '<https://example.com/wp-json/wp/v2/posts?context=edit&per_page=1&page=2>; rel="next"',
+        });
+      }
+      if (page === '2') {
+        return new Response(html, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+        });
+      }
+      return makeJsonResponse([{ id: 3 }], { 'x-wp-totalpages': '3' });
+    });
+    const client = createRestClient({
+      siteUrl: 'https://example.com',
+      username: 'a',
+      password: 'b',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const got: number[] = [];
+    const pages: Array<{ page: number; items: number; skipped?: boolean }> = [];
+    for await (const item of client.listItems('post', {
+      onPage: (page) => pages.push(page),
+    })) {
+      got.push((item as { id: number }).id);
+    }
+    expect(got).toEqual([1, 3]);
+    expect(pages).toEqual([
+      expect.objectContaining({ page: 1, items: 1 }),
+      expect.objectContaining({ page: 2, items: 0, skipped: true }),
+      expect.objectContaining({ page: 3, items: 1 }),
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('page=1');
+    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain('page=2');
+    expect(String(fetchImpl.mock.calls[2]?.[0])).toContain('page=3');
   });
 
   it('maps 401 to AuthError', async () => {
@@ -252,6 +298,69 @@ describe('rest-client', () => {
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('modified_after=2026-01-01T00%3A00%3A00');
   });
 
+  it('retries item listings without modified_after when WordPress rejects its date format', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 'rest_invalid_param',
+            message: 'Invalid parameter(s): modified_after',
+            data: { params: { modified_after: 'Invalid date format.' } },
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(makeJsonResponse([{ id: 1 }], { 'x-wp-totalpages': '1' }));
+    const client = createRestClient({
+      siteUrl: 'https://example.com',
+      username: 'a',
+      password: 'b',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const got: number[] = [];
+    for await (const item of client.listItems('post', { modifiedAfter: '2026-01-01T00:00:00Z' })) {
+      got.push((item as { id: number }).id);
+    }
+
+    expect(got).toEqual([1]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('modified_after=');
+    expect(String(fetchImpl.mock.calls[1]?.[0])).not.toContain('modified_after=');
+  });
+
+  it('retries item counts without modified_after when WordPress rejects its date format', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 'rest_invalid_param',
+            message: 'Invalid parameter(s): modified_after',
+            data: { params: { modified_after: 'Invalid date format.' } },
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse([], { 'x-wp-total': '37', 'x-wp-totalpages': '37' }),
+      );
+    const client = createRestClient({
+      siteUrl: 'https://example.com',
+      username: 'a',
+      password: 'b',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const total = await client.countItems('post', { modifiedAfter: '2026-01-01T00:00:00Z' });
+
+    expect(total).toBe(37);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('modified_after=');
+    expect(String(fetchImpl.mock.calls[1]?.[0])).not.toContain('modified_after=');
+  });
+
   it('createItem POSTs the payload as JSON to /<type>', async () => {
     const fetchImpl = vi.fn(
       async () =>
@@ -333,6 +442,20 @@ describe('rest-client', () => {
     });
     await expect(client.deleteItem('post', 1)).rejects.toBeInstanceOf(TransportError);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('getItem fetches one item by id with edit context', async () => {
+    const fetchImpl = vi.fn(async () => makeJsonResponse({ id: 42, modified_gmt: '2026-01-01T00:00:00' }));
+    const client = createRestClient({
+      siteUrl: 'https://example.com',
+      username: 'a',
+      password: 'b',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const item = await client.getItem('post', 42);
+    expect(item.id).toBe(42);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/wp-json/wp/v2/posts/42');
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('context=edit');
   });
 });
 

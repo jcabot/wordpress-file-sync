@@ -69,6 +69,9 @@ function fakeRest(itemsByType: { post?: RestItem[]; page?: RestItem[] } = {}): R
     deleteItem: async () => {
       throw new Error('not used');
     },
+    getItem: async () => {
+      throw new Error('not used');
+    },
   };
 }
 

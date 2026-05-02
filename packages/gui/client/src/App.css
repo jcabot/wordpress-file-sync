@@ -535,7 +535,7 @@ input:read-only { color: var(--ink-muted); }
 .column h3 + .deck { margin-bottom: 18px; }
 
 /* ──────────────────────────────────────────────────────────────────────
- *  Activity log — teletype
+ *  Activity log
  * ────────────────────────────────────────────────────────────────────── */
 
 .log-section {
@@ -558,7 +558,7 @@ input:read-only { color: var(--ink-muted); }
   position: relative;
 }
 .log::before {
-  content: '⏎ TELETYPE — wpsync stream';
+  content: 'SYNC LOG';
   display: block;
   font-family: var(--mono);
   font-size: 10px;
