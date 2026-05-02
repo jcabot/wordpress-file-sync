@@ -154,6 +154,7 @@ async function request(
   const headers: Record<string, string> = {
     Authorization: authHeader,
     Accept: 'application/json',
+    'User-Agent': 'wpsync/1.0 (+https://github.com/jcabot/wordpress-file-sync)',
   };
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   const init: RequestInit = {
@@ -243,18 +244,25 @@ async function request(
   const looksLikeRest = /\/wp-json\//.test(urlStr) || /[?&]rest_route=/.test(urlStr);
   if (method === 'GET' && looksLikeRest) {
     const contentType = res.headers.get('content-type') ?? '';
-    if (!/json/i.test(contentType)) {
-      let snippet = '';
+    const text = await res.text();
+    const isJsonContentType = /json/i.test(contentType);
+    let isJsonBody = false;
+    if (isJsonContentType) {
       try {
-        snippet = (await res.text()).slice(0, 100);
+        JSON.parse(text);
+        isJsonBody = true;
       } catch {
-        // ignore
+        isJsonBody = false;
       }
+    }
+    if (!isJsonContentType || !isJsonBody) {
+      const snippet = text.slice(0, 120).replace(/\s+/g, ' ').trim();
       throw new TransportError(
-        `Non-JSON response from ${urlStr} (Content-Type: ${contentType || 'missing'})${snippet ? `: ${snippet}` : ''} — WordPress may be returning a page instead of REST output (pretty permalinks disabled?).`,
+        `Non-JSON response from ${urlStr} (Content-Type: ${contentType || 'missing'})${snippet ? `: ${snippet}` : ''} — WordPress may be returning a page instead of REST output (pretty permalinks disabled, a cache/CDN, or a security plugin?).`,
         { status: 404 },
       );
     }
+    return new Response(text, { status: res.status, statusText: res.statusText, headers: res.headers });
   }
   return res;
 }
