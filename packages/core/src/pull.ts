@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { dirname } from 'node:path';
 import { isConflicted } from './conflict.js';
-import { ConflictError } from './errors.js';
+import { ConflictError, UnsupportedRestItemError } from './errors.js';
 import { encode, decode } from './frontmatter.js';
 import { restItemToFrontmatter } from './mapper.js';
 import { postFilePath } from './paths.js';
@@ -140,7 +140,28 @@ export async function pull(deps: PullDeps, opts: PullOptions = {}): Promise<Pull
     const isConflicting = conflictSet.has(slugKey);
     const writeLocal = !isConflicting || opts.forcePull || resolution === 'keep-server';
 
-    const { meta, body } = await restItemToFrontmatter(item, taxonomy);
+    let mapped: Awaited<ReturnType<typeof restItemToFrontmatter>>;
+    try {
+      mapped = await restItemToFrontmatter(item, taxonomy);
+    } catch (err) {
+      if (err instanceof UnsupportedRestItemError) {
+        index += 1;
+        events.emit('log', {
+          level: 'warn',
+          msg: `${slugKey}: ${err.message} Skipping item.`,
+        });
+        events.emit('item', {
+          op: 'pull',
+          slug: slugKey,
+          index,
+          total,
+          action: 'skip',
+        });
+        continue;
+      }
+      throw err;
+    }
+    const { meta, body } = mapped;
     const path = postFilePath(rootDir, type, meta.slug);
     const exists = await fileExists(path);
     const baseAction: 'create' | 'update' = exists ? 'update' : 'create';

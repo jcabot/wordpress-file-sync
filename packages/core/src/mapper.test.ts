@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { frontmatterToPayload, restItemToFrontmatter } from './mapper.js';
-import { UsageError } from './errors.js';
+import { UnsupportedRestItemError, UsageError } from './errors.js';
 import type { FrontMatter, RestItem } from './types.js';
 import type { TaxonomyCache } from './taxonomy-cache.js';
 
@@ -72,15 +72,15 @@ describe('mapper', () => {
 
   it('rejects unsupported post types', async () => {
     const item = { ...baseItem, type: 'attachment' };
-    await expect(restItemToFrontmatter(item as RestItem, taxonomy)).rejects.toThrow(
-      /unsupported post type/,
+    await expect(restItemToFrontmatter(item as RestItem, taxonomy)).rejects.toBeInstanceOf(
+      UnsupportedRestItemError,
     );
   });
 
   it('rejects unsupported statuses', async () => {
     const item = { ...baseItem, status: 'archived' };
-    await expect(restItemToFrontmatter(item as RestItem, taxonomy)).rejects.toThrow(
-      /unsupported status/,
+    await expect(restItemToFrontmatter(item as RestItem, taxonomy)).rejects.toBeInstanceOf(
+      UnsupportedRestItemError,
     );
   });
 });

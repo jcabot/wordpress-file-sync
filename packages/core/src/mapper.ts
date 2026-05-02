@@ -1,4 +1,4 @@
-import { UsageError } from './errors.js';
+import { UnsupportedRestItemError, UsageError } from './errors.js';
 import type { FrontMatter, PostStatus, PostType, RestItem } from './types.js';
 import type { TaxonomyCache } from './taxonomy-cache.js';
 
@@ -13,12 +13,16 @@ const VALID_STATUSES: PostStatus[] = [
 
 function asPostType(value: string): PostType {
   if (value === 'post' || value === 'page') return value;
-  throw new Error(`mapper: unsupported post type "${value}"`);
+  throw new UnsupportedRestItemError(`Unsupported WordPress post type "${value}" in REST response.`);
 }
 
 function asPostStatus(value: string): PostStatus {
   const found = VALID_STATUSES.find((s) => s === value);
-  if (!found) throw new Error(`mapper: unsupported status "${value}"`);
+  if (!found) {
+    throw new UnsupportedRestItemError(
+      `Unsupported WordPress post status "${value}" in REST response.`,
+    );
+  }
   return found;
 }
 

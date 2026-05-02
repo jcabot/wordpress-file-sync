@@ -28,7 +28,14 @@ export {
   postFilePath,
 } from './paths.js';
 
-export { AuthError, ConflictError, TransportError, UsageError, WpsyncError } from './errors.js';
+export {
+  AuthError,
+  ConflictError,
+  TransportError,
+  UnsupportedRestItemError,
+  UsageError,
+  WpsyncError,
+} from './errors.js';
 
 export { TypedEmitter } from './events.js';
 export type { SyncEvents } from './events.js';

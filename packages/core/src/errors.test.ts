@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { AuthError, ConflictError, TransportError, UsageError, WpsyncError } from './errors.js';
+import {
+  AuthError,
+  ConflictError,
+  TransportError,
+  UnsupportedRestItemError,
+  UsageError,
+  WpsyncError,
+} from './errors.js';
 
 describe('errors', () => {
   it('AuthError defaults to a clear message', () => {
@@ -25,5 +32,10 @@ describe('errors', () => {
   it('UsageError is its own class', () => {
     const e = new UsageError('bad flag');
     expect(e.name).toBe('UsageError');
+  });
+
+  it('UnsupportedRestItemError is its own class', () => {
+    const e = new UnsupportedRestItemError('bad REST item');
+    expect(e.name).toBe('UnsupportedRestItemError');
   });
 });

@@ -152,6 +152,44 @@ describe('pull', () => {
     await expect(fs.access(postFilePath(root, 'post', 'dry'))).rejects.toThrow();
   });
 
+  it('skips unsupported WordPress statuses instead of aborting the whole pull', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const itemEvents: SyncEvents['item'][] = [];
+    const logEvents: SyncEvents['log'][] = [];
+    events.on('item', (e) => itemEvents.push(e));
+    events.on('log', (e) => logEvents.push(e));
+
+    const result = await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({
+          post: [
+            makeItem({ slug: 'supported' }),
+            makeItem({ slug: 'workflow-draft', status: 'archived' }),
+          ],
+        }),
+        taxonomy,
+        state: emptyState,
+        events,
+      },
+      { type: 'post' },
+    );
+
+    expect(result.written).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(itemEvents.map((e) => `${e.slug}:${e.action}`)).toEqual([
+      'post/supported:create',
+      'post/workflow-draft:skip',
+    ]);
+    expect(logEvents[0]).toMatchObject({
+      level: 'warn',
+      msg: expect.stringContaining('Unsupported WordPress post status "archived"'),
+    });
+    await expect(fs.access(postFilePath(root, 'post', 'supported'))).resolves.toBeUndefined();
+    await expect(fs.access(postFilePath(root, 'post', 'workflow-draft'))).rejects.toThrow();
+  });
+
   it('--type filter restricts to one type', async () => {
     const events = new TypedEmitter<SyncEvents>();
     const result = await pull(

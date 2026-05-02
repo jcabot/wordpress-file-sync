@@ -22,6 +22,8 @@ export class TransportError extends WpsyncError {
 
 export class UsageError extends WpsyncError {}
 
+export class UnsupportedRestItemError extends WpsyncError {}
+
 export class ConflictError extends WpsyncError {
   readonly slugs: string[];
 
