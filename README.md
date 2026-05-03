@@ -376,7 +376,7 @@ WPSYNC_TEARDOWN=1 pnpm test:integration
 
 The four tests, drive the actual `wpsync` binary as a child process:
 
-- **`pull-pagination.test.ts`** — fresh init + `pull --full --type post`; asserts ≥101 seed files in `posts/`, which is only achievable if the paginator advanced past the per_page=100 cap.
+- **`pull-pagination.test.ts`** — fresh init + `pull --full --type post`; asserts ≥101 seed files in `posts/`. wpsync paginates **one item per REST request** (`per_page=1`) so a single bad post can't poison the whole pull, so this exercises ≥101 successful page fetches in sequence.
 - **`pull-roundtrip.test.ts`** — pull → edit a unique marker into a seed post's body → push → full-pull; asserts the body bytes after push equal the body bytes after re-pull.
 - **`conflict-halt.test.ts`** — pull a seed post, locally edit + bump mtime, mutate the same post server-side via `wp-cli`; asserts both `wpsync pull` and `wpsync push` exit 4, the local file is untouched, and the server's title is unchanged.
 - **`tombstone-no-force.test.ts`** — create a fresh post on the server, pull it, set `status: trash` locally, push; asserts the local file is gone, the server post is in `trash` status (not purged), and `wp post update --post_status=draft` successfully restores it — proving `force=true` was never sent.
@@ -387,7 +387,7 @@ CI runs the Docker integration suite on `ubuntu-latest` only (Docker on Windows 
 
 ## Project status
 
-`wpsync` v1 is **feature-complete and end-to-end-tested**. 124 unit tests + 4 integration tests pass on every run. The PRD §8 acceptance criteria — round-trip body integrity, ≥101-item pagination, conflict halt with exit 4 and zero writes, and tombstone DELETE without `force=true` — are all verified against a real Dockerised WordPress instance.
+`wpsync` v1 is **feature-complete and end-to-end-tested**. 130 unit tests + 4 integration tests pass on every run. The PRD §8 acceptance criteria — round-trip body integrity, ≥101-item pagination, conflict halt with exit 4 and zero writes, and tombstone DELETE without `force=true` — are all verified against a real Dockerised WordPress instance.
 
 | Milestone | Scope | State |
 |-----------|-------|-------|
@@ -397,7 +397,8 @@ CI runs the Docker integration suite on `ubuntu-latest` only (Docker on Windows 
 | **M4** | Conflict detection (exit 4, zero writes), tombstone deletion (DELETE without `force=true`), `wpsync status`, `--force-pull` / `--force-push` | ✅ done |
 | **M5** | GUI shell — Express backend + React 18 frontend (Vite), Setup wizard with server-side folder picker, Main view with SSE-driven progress | ✅ done |
 | **M6** | Per-slug ConflictModal, Settings screen (test creds, change password, switch folder, open config), production single-port deployment | ✅ done |
-| **M7** | Hardening: exponential-backoff retries with transient-network-error retry, Retry-After on 429, friendly 401/403/404/ECONNREFUSED/etc messages, push mtime race guard, dry-run output polish | ✅ done |
+| **M7** | Hardening: exponential-backoff retries with transient-network-error retry, Retry-After on 429, friendly 401/403/404/ECONNREFUSED/etc messages, push mtime race guard + per-item `getItem` re-check, dry-run output polish | ✅ done |
+| **M8** | Hostile-WP resilience: `per_page=1` listings, per-item skip on malformed responses (cache/CDN/security plugin returning HTML with JSON content-type), explicit `User-Agent`, `status=any` removed from listing params | ✅ done |
 | **Integration** | Dockerised WP fixture + 4 PRD §8 ACs (round-trip, ≥101-item pagination, conflict halt, no-force tombstone) | ✅ done |
 
 End-to-end smokes (mocked WP server, drives the actual `wpsync` binary):
@@ -424,6 +425,8 @@ node scripts/smoke-dryrun.mjs   # DRY RUN banner, breakdown summary, zero side-e
 **Pagination seems wrong.** Some WP installs sit behind reverse proxies that strip the `Link` response header. `wpsync` falls back to `X-WP-TotalPages` automatically; run with `--verbose` to see which path it took.
 
 **Conflict on a post I haven't touched locally.** Saving a file in your editor updates its `mtime` even if the bytes didn't change. Either re-pull with `--force-pull` to resync, or only save files when you actually edit them.
+
+**`Skipped malformed WordPress REST page X` warnings during pull.** Your WordPress install is intermittently returning the public homepage HTML in place of REST API JSON for specific posts — typically a cache plugin (W3 Total Cache, WP Rocket, LiteSpeed Cache) or security plugin (WordFence, Sucuri) or CDN page rule (Cloudflare) is intercepting a subset of `/wp-json/...` URLs based on something content-specific (a shortcode, a particular block, an image embed). wpsync detects the lying response, skips that one post, and keeps going — those items will be retried on the next pull. To eliminate the skips: identify the affected post slugs in the activity log, open them in wp-admin, and look for the rule trigger (often a Divi/Elementor template, a security-plugin "block by content pattern" rule, or a stale CDN cache entry that needs purging for that specific URL). Adding `/wp-json/*` to the cache plugin's exclusion list and purging the cache fixes most cases.
 
 **GUI: "EADDRINUSE" on port 4319 or 5173.** Another process is already bound to the port. Either close it or set `WPSYNC_PORT` in `packages/gui/.env` to a different number (the Vite dev server reads the same variable to wire its proxy correctly).
 

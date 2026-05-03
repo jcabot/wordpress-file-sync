@@ -419,7 +419,7 @@ input:read-only { color: var(--ink-muted); }
 
 .actions-strip {
   display: grid;
-  grid-template-columns: auto auto auto 1fr;
+  grid-template-columns: auto auto 1fr;
   gap: 12px;
   align-items: stretch;
   margin: 28px 0 36px;
@@ -446,63 +446,6 @@ input:read-only { color: var(--ink-muted); }
   margin-right: 8px;
   color: var(--rust);
 }
-
-/* ──────────────────────────────────────────────────────────────────────
- *  Stats inset — display-typography counts
- * ────────────────────────────────────────────────────────────────────── */
-
-.stats-inset {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 0;
-  border-top: 2px solid var(--ink);
-  border-bottom: 2px solid var(--ink);
-  margin-bottom: 28px;
-  animation: rise 700ms 160ms ease-out both;
-}
-@media (max-width: 900px) { .stats-inset { grid-template-columns: repeat(3, 1fr); } .stats-inset > .stat-cell:nth-child(3n) { border-right: none; } }
-@media (max-width: 540px) { .stats-inset { grid-template-columns: repeat(2, 1fr); } .stats-inset > .stat-cell:nth-child(2n) { border-right: none; } .stats-inset > .stat-cell:nth-child(3n) { border-right: 1px solid var(--paper-edge); } }
-
-.stat-cell {
-  padding: 18px 16px 14px;
-  border-right: 1px solid var(--paper-edge);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.stat-cell:last-child { border-right: none; }
-.stat-cell .label {
-  font-family: var(--sans);
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  font-weight: 600;
-  color: var(--ink-muted);
-  line-height: 1.2;
-}
-.stat-cell .value {
-  font-family: var(--serif);
-  font-weight: 500;
-  font-variation-settings: 'opsz' 96, 'SOFT' 0, 'WONK' 1;
-  font-size: 56px;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  color: var(--ink);
-  margin-top: 4px;
-  font-feature-settings: 'lnum';
-}
-.stat-cell.warn .value { color: var(--ochre); }
-.stat-cell.bad  .value { color: var(--rust); }
-.stat-cell.good .value { color: var(--moss); }
-.stat-cell .hairline {
-  width: 24px;
-  height: 1.5px;
-  background: var(--ink);
-  margin-top: 8px;
-}
-.stat-cell.warn .hairline { background: var(--ochre); }
-.stat-cell.bad  .hairline { background: var(--rust); }
-.stat-cell.good .hairline { background: var(--moss); }
 
 /* ──────────────────────────────────────────────────────────────────────
  *  Article columns (panels)

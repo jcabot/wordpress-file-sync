@@ -6,7 +6,6 @@ import {
   type DoneEvent,
   type ItemEvent,
   type LogEvent,
-  type StatusCounts,
 } from '../lib/api';
 import { ConflictModal } from '../components/ConflictModal';
 
@@ -24,15 +23,6 @@ interface LogLine {
 
 type Phase = 'idle' | 'pulling' | 'pushing';
 
-const EMPTY_COUNTS: StatusCounts = {
-  pendingPull: 0,
-  pendingPush: 0,
-  conflict: 0,
-  tombstone: 0,
-  newLocal: 0,
-  upToDate: 0,
-};
-
 function fmtTs(): string {
   return new Date().toTimeString().slice(0, 8);
 }
@@ -40,7 +30,6 @@ function fmtTs(): string {
 export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
   const [phase, setPhase] = useState<Phase>('idle');
   const [progress, setProgress] = useState<string>('');
-  const [counts, setCounts] = useState<StatusCounts>(EMPTY_COUNTS);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [log, setLog] = useState<LogLine[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +72,6 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
   async function refreshStatus(): Promise<void> {
     const r = await api.status();
     if (r.ok) {
-      setCounts(r.counts);
       setLastSync(r.lastSync);
       setError(null);
     } else {
@@ -195,19 +183,7 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
           <button disabled={busy} onClick={() => runPush()}>
             {phase === 'pushing' ? 'Pushing...' : 'Push'}
           </button>
-          <button disabled={busy} onClick={() => void refreshStatus()}>
-            Refresh
-          </button>
           <div className="progress">{progress || (busy ? 'Working...' : 'Ready.')}</div>
-        </div>
-
-        <div className="stats-inset">
-          <StatCell label="Pending pulls" value={counts.pendingPull} kind={counts.pendingPull > 0 ? 'warn' : ''} />
-          <StatCell label="Pending pushes" value={counts.pendingPush} kind={counts.pendingPush > 0 ? 'warn' : ''} />
-          <StatCell label="New local" value={counts.newLocal} kind={counts.newLocal > 0 ? 'warn' : ''} />
-          <StatCell label="Tombstones" value={counts.tombstone} kind={counts.tombstone > 0 ? 'warn' : ''} />
-          <StatCell label="Conflicts" value={counts.conflict} kind={counts.conflict > 0 ? 'bad' : ''} />
-          <StatCell label="Up to date" value={counts.upToDate} kind="good" />
         </div>
 
         <section className="log-section">
@@ -240,15 +216,5 @@ export function Main({ rootDir, siteUrl, onOpenSettings }: Props): JSX.Element {
         />
       )}
     </>
-  );
-}
-
-function StatCell({ label, value, kind }: { label: string; value: number; kind: string }): JSX.Element {
-  return (
-    <div className={`stat-cell ${kind}`}>
-      <span className="label">{label}</span>
-      <span className="value">{value}</span>
-      <span className="hairline" />
-    </div>
   );
 }

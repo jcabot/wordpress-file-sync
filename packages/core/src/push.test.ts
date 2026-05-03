@@ -434,6 +434,7 @@ describe('push', () => {
             featured_media: 0,
           } as RestItem;
         })(),
+      getItem: async () => ({ ...baseRestItem(), modified_gmt: '2025-04-01T00:00:00' }),
       updateItem: updateItem as RestClient['updateItem'],
     });
     const { events } = makeEvents();

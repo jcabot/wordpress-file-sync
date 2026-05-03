@@ -40,27 +40,6 @@ export type BridgeError =
   | { ok: false; code: 'usage'; message: string }
   | { ok: false; code: 'other'; message: string };
 
-export interface StatusCounts {
-  pendingPull: number;
-  pendingPush: number;
-  conflict: number;
-  tombstone: number;
-  newLocal: number;
-  upToDate: number;
-}
-
-export interface StatusEntry {
-  type: 'post' | 'page';
-  slug: string;
-  state:
-    | 'up-to-date'
-    | 'pending-pull'
-    | 'pending-push'
-    | 'conflict'
-    | 'tombstone'
-    | 'new-local';
-}
-
 export type ConflictResolution = 'keep-local' | 'keep-server' | 'skip';
 export type ConflictResolutions = Record<string, ConflictResolution>;
 
@@ -140,15 +119,7 @@ export const api = {
     return postJson('/api/adopt', { rootDir });
   },
 
-  async status(): Promise<
-    | {
-        ok: true;
-        lastSync: string | null;
-        counts: StatusCounts;
-        entries: StatusEntry[];
-      }
-    | BridgeError
-  > {
+  async status(): Promise<{ ok: true; lastSync: string | null } | BridgeError> {
     return getJson('/api/status');
   },
 
