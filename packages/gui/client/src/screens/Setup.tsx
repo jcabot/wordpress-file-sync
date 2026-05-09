@@ -4,6 +4,7 @@ import { FolderPicker } from '../components/FolderPicker';
 
 interface Props {
   onConfigured: (rootDir: string) => void;
+  initialRootDir?: string;
 }
 
 type Phase = 'idle' | 'verifying-url' | 'verifying-auth' | 'writing' | 'error' | 'done';
@@ -13,9 +14,9 @@ interface Banner {
   text: string;
 }
 
-export function Setup({ onConfigured }: Props): JSX.Element {
+export function Setup({ onConfigured, initialRootDir }: Props): JSX.Element {
   const [siteUrl, setSiteUrl] = useState('');
-  const [rootDir, setRootDir] = useState('');
+  const [rootDir, setRootDir] = useState(initialRootDir ?? '');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');

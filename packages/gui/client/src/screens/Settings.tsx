@@ -8,6 +8,7 @@ interface Props {
   username: string;
   onBack: () => void;
   onSwitchFolder: (rootDir: string) => void;
+  onSetupFolder: (rootDir: string) => void;
 }
 
 interface Banner {
@@ -15,7 +16,7 @@ interface Banner {
   text: string;
 }
 
-export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }: Props): JSX.Element {
+export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder, onSetupFolder }: Props): JSX.Element {
   const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
@@ -79,10 +80,7 @@ export function Settings({ rootDir, siteUrl, username, onBack, onSwitchFolder }:
         setBanner({ kind: 'bad', text: adopt.message });
       }
     } else {
-      setBanner({
-        kind: 'info',
-        text: `Folder ${chosen} is not configured. Use the Setup wizard from a fresh launch to initialize it.`,
-      });
+      onSetupFolder(chosen);
     }
     setBusy(false);
   }

@@ -13,7 +13,7 @@ interface Configured {
 
 type Mode =
   | { kind: 'loading' }
-  | { kind: 'setup' }
+  | { kind: 'setup'; initialRootDir?: string }
   | { kind: 'main'; cfg: Configured }
   | { kind: 'settings'; cfg: Configured };
 
@@ -30,16 +30,20 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void (async () => {
-      const last = await api.lastRootDir();
-      if (last) {
-        const cfg = await tryLoadConfigured(last);
-        if (cfg) {
-          const adopt = await api.adopt(cfg.rootDir);
-          if (adopt.ok) {
-            setMode({ kind: 'main', cfg });
-            return;
+      try {
+        const last = await api.lastRootDir();
+        if (last) {
+          const cfg = await tryLoadConfigured(last);
+          if (cfg) {
+            const adopt = await api.adopt(cfg.rootDir);
+            if (adopt.ok) {
+              setMode({ kind: 'main', cfg });
+              return;
+            }
           }
         }
+      } catch {
+        // fall through to setup on any backend failure (e.g. proxy not ready yet)
       }
       setMode({ kind: 'setup' });
     })();
@@ -59,7 +63,7 @@ export function App(): JSX.Element {
   if (mode.kind === 'loading') {
     return (
       <div className="app">
-        <div className="splash">setting type</div>
+        <div className="splash">Loading…</div>
       </div>
     );
   }
@@ -68,7 +72,10 @@ export function App(): JSX.Element {
     return (
       <div className="app">
         <div className="content">
-          <Setup onConfigured={onConfigured} />
+          <Setup
+            onConfigured={onConfigured}
+            {...(mode.initialRootDir ? { initialRootDir: mode.initialRootDir } : {})}
+          />
         </div>
       </div>
     );
@@ -83,6 +90,7 @@ export function App(): JSX.Element {
           username={mode.cfg.username}
           onBack={() => setMode({ kind: 'main', cfg: mode.cfg })}
           onSwitchFolder={onSwitchFolder}
+          onSetupFolder={(rd) => setMode({ kind: 'setup', initialRootDir: rd })}
         />
       </div>
     );
