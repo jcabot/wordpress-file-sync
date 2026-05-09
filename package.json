@@ -9,6 +9,7 @@
   },
   "packageManager": "pnpm@10.33.2",
   "scripts": {
+    "dev": "pnpm --filter @wpsync/gui dev",
     "build": "tsc -b && pnpm --filter @wpsync/gui build:client",
     "clean": "tsc -b --clean",
     "test": "pnpm -r test",
