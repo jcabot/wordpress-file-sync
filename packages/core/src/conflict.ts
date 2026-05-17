@@ -1,6 +1,6 @@
 const TOLERANCE_MS = 2000;
 
-function appendZ(s: string): string {
+export function appendZ(s: string): string {
   return /[Zz]|[+-]\d{2}:\d{2}$/.test(s) ? s : `${s}Z`;
 }
 

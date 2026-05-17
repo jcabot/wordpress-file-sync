@@ -519,7 +519,7 @@ input:read-only { color: var(--ink-muted); }
 }
 .log .ev-create { color: #b6d77c; }
 .log .ev-update { color: #f6c463; }
-.log .ev-delete { color: var(--rust-soft); }
+.log .ev-delete { color: #ff5b4d; font-weight: 600; }
 .log .ev-skip   { color: var(--paper-edge); font-style: italic; }
 .log .ev-error  { color: var(--rust-soft); font-weight: 500; }
 

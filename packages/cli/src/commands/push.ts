@@ -39,12 +39,15 @@ export async function pushCommand(opts: PushCmdOpts): Promise<void> {
 
   const counts = { create: 0, update: 0, delete: 0, skip: 0 };
   const linePrefix = opts.dryRun ? '[DRY] ' : '';
+  const useColor = process.stdout.isTTY === true && !process.env['NO_COLOR'];
+  const red = (s: string) => (useColor ? `\x1b[31m${s}\x1b[0m` : s);
 
   session.events.on('item', (e) => {
     counts[e.action] = (counts[e.action] ?? 0) + 1;
     if (opts.verbose) {
       const total = e.total > 0 ? `/${e.total}` : '';
-      const verb = opts.dryRun ? `would ${e.action}` : e.action;
+      const raw = opts.dryRun ? `would ${e.action}` : e.action;
+      const verb = e.action === 'delete' ? red(raw) : raw;
       process.stdout.write(`${linePrefix}[${e.index}${total}] ${e.slug}: ${verb}\n`);
     }
   });
@@ -67,9 +70,12 @@ export async function pushCommand(opts: PushCmdOpts): Promise<void> {
 
   if (!opts.quiet) {
     const verb = opts.dryRun ? 'Would push' : 'Pushed';
+    const deletedStr = counts.delete > 0
+      ? red(`deleted ${counts.delete}`)
+      : `deleted ${counts.delete}`;
     console.log(
       `${verb} ${result.written} item${result.written === 1 ? '' : 's'}` +
-        ` (created ${counts.create}, updated ${counts.update}, deleted ${counts.delete}, skipped ${counts.skip}).`,
+        ` (created ${counts.create}, updated ${counts.update}, ${deletedStr}, skipped ${counts.skip}).`,
     );
   }
 }

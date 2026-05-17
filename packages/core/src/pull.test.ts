@@ -50,17 +50,28 @@ function makeItem(over: Partial<RestItem> = {}): RestItem {
   };
 }
 
-function fakeRest(itemsByType: { post?: RestItem[]; page?: RestItem[] }): RestClient {
+interface FakeRestItems {
+  post?: RestItem[];
+  page?: RestItem[];
+  trashedPost?: RestItem[];
+  trashedPage?: RestItem[];
+}
+
+function fakeRest(itemsByType: FakeRestItems): RestClient {
+  const trashFor = (type: 'post' | 'page'): RestItem[] =>
+    (type === 'post' ? itemsByType.trashedPost : itemsByType.trashedPage) ?? [];
   return {
-    listItems: (type, _opts) =>
+    listItems: (type, listOpts) =>
       (async function* () {
-        for (const item of itemsByType[type] ?? []) yield item;
+        const list = listOpts.status === 'trash' ? trashFor(type) : (itemsByType[type] ?? []);
+        for (const item of list) yield item;
       })(),
     countItems: async (type) => (itemsByType[type] ?? []).length,
     listTaxonomy: () => (async function* () {})(),
     getMe: async () => ({ id: 0, slug: '' }),
     getItem: async (type, id) => {
-      const item = (itemsByType[type] ?? []).find((candidate) => candidate.id === id);
+      const all = [...(itemsByType[type] ?? []), ...trashFor(type)];
+      const item = all.find((candidate) => candidate.id === id);
       if (!item) throw new Error(`No fake ${type} item with id ${id}`);
       return item;
     },
@@ -434,5 +445,375 @@ describe('pull', () => {
     );
     expect(observed.startTotal).toBe(2);
     expect(observed.doneWritten).toBe(2);
+  });
+
+  it('deletes the local file when a server post is trashed and local is unchanged', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const item1 = makeItem({ id: 1, slug: 'gone', modified_gmt: '2025-01-01T00:00:00' });
+    await pull(
+      { rootDir: root, config, rest: fakeRest({ post: [item1] }), taxonomy, state: emptyState, events },
+      { type: 'post' },
+    );
+    const path = postFilePath(root, 'post', 'gone');
+    await expect(fs.access(path)).resolves.toBeUndefined();
+
+    const trashed = makeItem({
+      id: 1,
+      slug: 'gone',
+      status: 'trash',
+      modified_gmt: '2025-02-01T00:00:00',
+    });
+    const stateAfter: State = { schema_version: 1, last_sync: '2025-01-01T00:00:00' };
+
+    const itemEvents: SyncEvents['item'][] = [];
+    events.on('item', (e) => itemEvents.push(e));
+
+    const result = await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ trashedPost: [trashed] }),
+        taxonomy,
+        state: stateAfter,
+        events,
+      },
+      { type: 'post' },
+    );
+
+    expect(result.written).toBe(1);
+    expect(itemEvents.at(-1)).toMatchObject({ action: 'delete', slug: 'post/gone' });
+    await expect(fs.access(path)).rejects.toThrow();
+    expect(result.newState.last_sync).toBe('2025-02-01T00:00:00');
+  });
+
+  it('detects server-side deletion for pages too (not just posts)', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    // Seed a page via a live pull.
+    const livePage = makeItem({
+      id: 12,
+      type: 'page',
+      slug: 'about',
+      parent: 0,
+      modified_gmt: '2025-01-01T00:00:00',
+    });
+    await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ page: [livePage] }),
+        taxonomy,
+        state: emptyState,
+        events,
+      },
+      { type: 'page' },
+    );
+    const path = postFilePath(root, 'page', 'about');
+    await expect(fs.access(path)).resolves.toBeUndefined();
+
+    // Now the page is trashed on the server — WP suffixes the slug.
+    const trashedPage = makeItem({
+      id: 12,
+      type: 'page',
+      slug: 'about__trashed',
+      parent: 0,
+      status: 'trash',
+      modified_gmt: '2025-02-01T00:00:00',
+    });
+    const itemEvents: SyncEvents['item'][] = [];
+    events.on('item', (e) => itemEvents.push(e));
+
+    const result = await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ trashedPage: [trashedPage] }),
+        taxonomy,
+        state: { schema_version: 1, last_sync: '2025-01-01T00:00:00' },
+        events,
+      },
+      { type: 'page' },
+    );
+
+    expect(result.written).toBe(1);
+    expect(itemEvents.at(-1)).toMatchObject({ action: 'delete', slug: 'page/about' });
+    await expect(fs.access(path)).rejects.toThrow();
+  });
+
+  it('strips WP\'s __trashed slug suffix when matching the local file', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const item1 = makeItem({ id: 5, slug: 'about', modified_gmt: '2025-01-01T00:00:00' });
+    await pull(
+      { rootDir: root, config, rest: fakeRest({ post: [item1] }), taxonomy, state: emptyState, events },
+      { type: 'post' },
+    );
+    const path = postFilePath(root, 'post', 'about');
+    await expect(fs.access(path)).resolves.toBeUndefined();
+
+    // WP renames the slug to `<original>__trashed` when a post is trashed.
+    const trashed = makeItem({
+      id: 5,
+      slug: 'about__trashed',
+      status: 'trash',
+      modified_gmt: '2025-02-01T00:00:00',
+    });
+
+    const itemEvents: SyncEvents['item'][] = [];
+    events.on('item', (e) => itemEvents.push(e));
+
+    const result = await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ trashedPost: [trashed] }),
+        taxonomy,
+        state: { schema_version: 1, last_sync: '2025-01-01T00:00:00' },
+        events,
+      },
+      { type: 'post' },
+    );
+
+    expect(result.written).toBe(1);
+    expect(itemEvents.at(-1)).toMatchObject({ action: 'delete', slug: 'post/about' });
+    await expect(fs.access(path)).rejects.toThrow();
+  });
+
+  it('halts with ConflictError when local was edited and server trashed it', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const item1 = makeItem({ id: 1, slug: 'edited-then-trashed', modified_gmt: '2025-01-01T00:00:00' });
+    await pull(
+      { rootDir: root, config, rest: fakeRest({ post: [item1] }), taxonomy, state: emptyState, events },
+      { type: 'post' },
+    );
+    const path = postFilePath(root, 'post', 'edited-then-trashed');
+    const future = Date.now() / 1000 + 60;
+    await fs.utimes(path, future, future);
+
+    const trashed = makeItem({
+      id: 1,
+      slug: 'edited-then-trashed',
+      status: 'trash',
+      modified_gmt: '2025-02-01T00:00:00',
+    });
+    const stateAfter: State = { schema_version: 1, last_sync: '2025-01-01T00:00:00' };
+
+    const { ConflictError } = await import('./errors.js');
+    await expect(
+      pull(
+        {
+          rootDir: root,
+          config,
+          rest: fakeRest({ trashedPost: [trashed] }),
+          taxonomy,
+          state: stateAfter,
+          events,
+        },
+        { type: 'post' },
+      ),
+    ).rejects.toBeInstanceOf(ConflictError);
+
+    // Conflict halt = zero writes. File must still be on disk.
+    await expect(fs.access(path)).resolves.toBeUndefined();
+  });
+
+  it('deletion conflict resolved as "keep-server" removes the local file', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const item1 = makeItem({ id: 1, slug: 'a', modified_gmt: '2025-01-01T00:00:00' });
+    await pull(
+      { rootDir: root, config, rest: fakeRest({ post: [item1] }), taxonomy, state: emptyState, events },
+      { type: 'post' },
+    );
+    const path = postFilePath(root, 'post', 'a');
+    const future = Date.now() / 1000 + 60;
+    await fs.utimes(path, future, future);
+
+    const trashed = makeItem({
+      id: 1,
+      slug: 'a',
+      status: 'trash',
+      modified_gmt: '2025-04-01T00:00:00',
+    });
+    const stateAfter: State = { schema_version: 1, last_sync: '2025-01-01T00:00:00' };
+
+    const result = await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ trashedPost: [trashed] }),
+        taxonomy,
+        state: stateAfter,
+        events,
+      },
+      { type: 'post', resolutions: { 'post/a': 'keep-server' } },
+    );
+
+    expect(result.written).toBe(1);
+    await expect(fs.access(path)).rejects.toThrow();
+  });
+
+  it('deletion conflict resolved as "keep-local" keeps the file and logs a warning', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const item1 = makeItem({ id: 1, slug: 'a', modified_gmt: '2025-01-01T00:00:00' });
+    await pull(
+      { rootDir: root, config, rest: fakeRest({ post: [item1] }), taxonomy, state: emptyState, events },
+      { type: 'post' },
+    );
+    const path = postFilePath(root, 'post', 'a');
+    const future = Date.now() / 1000 + 60;
+    await fs.utimes(path, future, future);
+
+    const trashed = makeItem({
+      id: 1,
+      slug: 'a',
+      status: 'trash',
+      modified_gmt: '2025-04-01T00:00:00',
+    });
+    const stateAfter: State = { schema_version: 1, last_sync: '2025-01-01T00:00:00' };
+
+    const logEvents: SyncEvents['log'][] = [];
+    events.on('log', (e) => logEvents.push(e));
+
+    const result = await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ trashedPost: [trashed] }),
+        taxonomy,
+        state: stateAfter,
+        events,
+      },
+      { type: 'post', resolutions: { 'post/a': 'keep-local' } },
+    );
+
+    expect(result.written).toBe(0);
+    expect(result.skipped).toBe(1);
+    await expect(fs.access(path)).resolves.toBeUndefined();
+    expect(logEvents.find((e) => e.level === 'warn' && /post\/a/.test(e.msg))).toBeTruthy();
+  });
+
+  it('ignores a trashed item when no local file exists', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const trashed = makeItem({
+      id: 42,
+      slug: 'never-pulled',
+      status: 'trash',
+      modified_gmt: '2025-04-01T00:00:00',
+    });
+    const itemEvents: SyncEvents['item'][] = [];
+    events.on('item', (e) => itemEvents.push(e));
+
+    const result = await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ trashedPost: [trashed] }),
+        taxonomy,
+        state: emptyState,
+        events,
+      },
+      { type: 'post' },
+    );
+
+    expect(result.written).toBe(0);
+    expect(itemEvents).toEqual([]);
+  });
+
+  it('ignores a trashed item when local has a different id (different post under the same slug)', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const item1 = makeItem({ id: 99, slug: 'reused-slug', modified_gmt: '2025-01-01T00:00:00' });
+    await pull(
+      { rootDir: root, config, rest: fakeRest({ post: [item1] }), taxonomy, state: emptyState, events },
+      { type: 'post' },
+    );
+    const path = postFilePath(root, 'post', 'reused-slug');
+
+    const trashed = makeItem({
+      id: 7,
+      slug: 'reused-slug',
+      status: 'trash',
+      modified_gmt: '2025-04-01T00:00:00',
+    });
+
+    const result = await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ trashedPost: [trashed] }),
+        taxonomy,
+        state: { schema_version: 1, last_sync: '2025-01-01T00:00:00' },
+        events,
+      },
+      { type: 'post' },
+    );
+
+    expect(result.written).toBe(0);
+    await expect(fs.access(path)).resolves.toBeUndefined();
+  });
+
+  it('skips trash deletion when local file already has status: trash (push owns it)', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const item1 = makeItem({ id: 1, slug: 'local-tombstone', modified_gmt: '2025-01-01T00:00:00' });
+    await pull(
+      { rootDir: root, config, rest: fakeRest({ post: [item1] }), taxonomy, state: emptyState, events },
+      { type: 'post' },
+    );
+    const path = postFilePath(root, 'post', 'local-tombstone');
+    const text = await fs.readFile(path, 'utf8');
+    await fs.writeFile(path, text.replace(/status:\s*publish/, 'status: trash'), 'utf8');
+
+    const trashed = makeItem({
+      id: 1,
+      slug: 'local-tombstone',
+      status: 'trash',
+      modified_gmt: '2025-04-01T00:00:00',
+    });
+
+    const result = await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ trashedPost: [trashed] }),
+        taxonomy,
+        state: { schema_version: 1, last_sync: '2025-01-01T00:00:00' },
+        events,
+      },
+      { type: 'post' },
+    );
+
+    expect(result.written).toBe(0);
+    await expect(fs.access(path)).resolves.toBeUndefined();
+  });
+
+  it('dryRun emits delete action for a trashed item but keeps the local file', async () => {
+    const events = new TypedEmitter<SyncEvents>();
+    const item1 = makeItem({ id: 1, slug: 'going', modified_gmt: '2025-01-01T00:00:00' });
+    await pull(
+      { rootDir: root, config, rest: fakeRest({ post: [item1] }), taxonomy, state: emptyState, events },
+      { type: 'post' },
+    );
+    const path = postFilePath(root, 'post', 'going');
+
+    const trashed = makeItem({
+      id: 1,
+      slug: 'going',
+      status: 'trash',
+      modified_gmt: '2025-04-01T00:00:00',
+    });
+    const itemEvents: SyncEvents['item'][] = [];
+    events.on('item', (e) => itemEvents.push(e));
+
+    await pull(
+      {
+        rootDir: root,
+        config,
+        rest: fakeRest({ trashedPost: [trashed] }),
+        taxonomy,
+        state: { schema_version: 1, last_sync: '2025-01-01T00:00:00' },
+        events,
+      },
+      { type: 'post', dryRun: true },
+    );
+
+    expect(itemEvents.at(-1)).toMatchObject({ action: 'delete', slug: 'post/going' });
+    await expect(fs.access(path)).resolves.toBeUndefined();
   });
 });

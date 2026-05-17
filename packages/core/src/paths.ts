@@ -28,3 +28,9 @@ export function typeDir(rootDir: string, type: PostType): string {
 export function postFilePath(rootDir: string, type: PostType, slug: string): string {
   return join(typeDir(rootDir, type), `${slug}.html`);
 }
+
+// PRD §8 AC: slugs can collide across `posts/` and `pages/`, so all user-facing
+// item references (conflict reports, log lines, item events) must be `<type>/<slug>`.
+export function slugKey(type: PostType, slug: string): string {
+  return `${type}/${slug}`;
+}

@@ -66,7 +66,7 @@ CLI and GUI both subscribe to `session.events`. CLI pipes them to stdout (verbos
 | `state.ts` | Atomic temp+rename writes for `.wpsync/state.json` and `.wpsync/config.toml` (`@iarna/toml`) |
 | `taxonomy-cache.ts` | Lazy-load categories/tags, persist to `.wpsync/taxonomy.json` |
 | `mapper.ts` | `restItemToFrontmatter` and inverse; ID↔slug taxonomy resolution |
-| `pull.ts` | `modified_after` query, paginate one item at a time, surface per-page progress via `onPage` callback (emitted as `log` events), write files, advance `last_sync` to **max** observed `modified_gmt`. **Skipped pages** (server returned HTML/non-JSON for that specific item) emit `level: 'warn'` log entries and don't break the run |
+| `pull.ts` | `modified_after` query, paginate one item at a time, surface per-page progress via `onPage` callback (emitted as `log` events), write files, advance `last_sync` to **max** observed `modified_gmt`. **Skipped pages** (server returned HTML/non-JSON for that specific item) emit `level: 'warn'` log entries and don't break the run. **Also lists trashed items** via a second `status=trash` listing per type and mirrors server deletions locally — see "Server-side deletion detection" below |
 | `push.ts` | Walk dir, decode, compare `mtime` vs front-matter `modified_gmt`, fetch fresh `getItem(id)` per candidate just before send (race guard), POST/create, write back |
 | `conflict.ts` | Pure detector; runs **before any writes** |
 | `tombstone.ts` | `status: trash` → `DELETE /wp/v2/<type>/<id>` **without `force`** (PRD §4.5, §8 AC) |
@@ -102,7 +102,7 @@ These are not negotiable — they come from the PRD and breaking them violates a
 1. **Verbatim `post_content`.** Body is `content.raw` written byte-for-byte; never transform, normalise whitespace, or re-render. Round-trip integrity AC depends on this (PRD §4.1, §8).
 2. **`context=edit` always** on posts/pages REST queries (PRD §6) — without it the API returns `content.rendered`, breaking round-trip.
 3. **DELETE never sends `force=true`.** Trashes only; permanent deletion is a wp-admin-only action. Verifiable by HTTP capture (PRD §4.5, §8 AC).
-4. **Plain `rm` is not a deletion.** A removed file is re-pulled on next sync. Tombstone deletion = set `status: trash` in front-matter and push.
+4. **Plain `rm` is not a deletion.** A removed file is re-pulled on next sync. Tombstone deletion = set `status: trash` in front-matter and push. Going the other direction, a post trashed in wp-admin **does** delete the local file on next pull — see "Server-side deletion detection".
 5. **Credentials never leave `<root>/.wpsync/credentials.json`.** No password in `state.json`, `config.toml`, log output, or any Git-tracked file (PRD §8 AC). The `.gitignore` written by `init` excludes `credentials.json`.
 6. **Conflict halt = zero writes.** When both sides have changed since `last_sync`, exit code 4, name affected slugs, no file or API writes happen.
 7. **Always print `<type>/<slug>`** in conflict reports — slugs can collide across `posts/` and `pages/`.
@@ -118,6 +118,21 @@ Real WordPress installs sit behind cache plugins, CDNs, and security plugins tha
 - **The `User-Agent` header is set to `wpsync/1.0 (+https://github.com/jcabot/wordpress-file-sync)`** — Node's default UA gets flagged by some security plugins as an unknown scraper.
 - **`status=any` is NOT included in listing params** — it was implicated in triggering the bad path on at least one production site (livablesoftware.com). The default `context=edit` returns publish + draft + pending + private + future already, which is what we want.
 - **Skipped items are not fatal**, not counted toward `written`, and don't break the conflict pre-pass. A subsequent pull will re-attempt them. The user can identify problem posts in the activity log and fix them at the source (usually a specific block of content or shortcode that triggers the cache/security rule).
+
+## Server-side deletion detection
+
+Pull mirrors server-side deletions back to disk so a post trashed in wp-admin disappears locally on the next sync.
+
+- After fetching live items per type, `pull.ts` makes a **second listing call with `status: 'trash'`** (same `modified_after` for incremental). The new `ListItemsOptions.status` field on `RestClient.listItems` carries this through.
+- For each trashed item, if a local file exists at the slug path **and** its `id` matches the trashed item's id **and** its local `status` is not already `trash` (a pending local tombstone — push owns it), the file is a deletion candidate.
+- **Deletion conflict**: if `localChanged(fileMtimeMs, localModifiedGmt)` is true at deletion-candidate time, the slug is added to the conflict set alongside any normal "both-sides-changed" conflicts. Unresolved deletion conflicts trigger `ConflictError`, exit code 4, zero writes — same halt semantics as edits.
+- **Resolution semantics for deletion conflicts**:
+  - `keep-server` (or `--force-pull`) → unlink the local file.
+  - `keep-local` / `skip` → keep the file, emit a `level: 'warn'` log explaining the server post is still trashed and that the user needs to un-trash on the server or clear `id` from front-matter to detach.
+  - No "auto-restore" — pull never tries to un-trash on the user's behalf. Explicit by design.
+- `last_sync` is advanced from trashed items too (whether deleted or kept), so an incremental pull won't re-discover the same trashes forever.
+- **Force-deleted posts** (server row gone, not in trash either) are **not detected**. Only trashes show up in the `status=trash` listing. This is an accepted gap; force-deletion is a wp-admin "empty trash" action and a once-in-a-while event, while every wp-admin "Delete" button trashes.
+- Dry-run emits `action: 'delete'` for trashed items but does not unlink.
 
 ## Time and mtime semantics
 

@@ -49,6 +49,13 @@ function filterByModifiedAfter(items, url) {
   return items.filter((p) => Date.parse(p.modified_gmt + 'Z') > Date.parse(after));
 }
 
+function filterByStatus(items, url) {
+  const status = url.searchParams.get('status');
+  if (status === 'trash') return items.filter((p) => p.status === 'trash');
+  // Default listing (no status param) excludes trash, mirroring real WP behaviour.
+  return items.filter((p) => p.status !== 'trash');
+}
+
 async function readJsonBody(req) {
   let raw = '';
   for await (const chunk of req) raw += chunk;
@@ -71,7 +78,7 @@ const server = createServer(async (req, res) => {
   if (m === '/wp-json/wp/v2/tags') return setHeaders(res, []);
 
   if (m === '/wp-json/wp/v2/posts') {
-    if (req.method === 'GET') return setHeaders(res, filterByModifiedAfter(POSTS, url));
+    if (req.method === 'GET') return setHeaders(res, filterByStatus(filterByModifiedAfter(POSTS, url), url));
     if (req.method === 'POST') {
       const body = await readJsonBody(req);
       const next = makePost({
@@ -99,6 +106,9 @@ const server = createServer(async (req, res) => {
     if (idx === -1) {
       res.writeHead(404).end();
       return;
+    }
+    if (req.method === 'GET') {
+      return setHeaders(res, POSTS[idx]);
     }
     if (req.method === 'POST') {
       const body = await readJsonBody(req);

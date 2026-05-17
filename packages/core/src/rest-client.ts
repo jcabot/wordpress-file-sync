@@ -12,6 +12,9 @@ export interface RestClientOptions {
 
 export interface ListItemsOptions {
   modifiedAfter?: string | null;
+  // Only `'trash'` is supported. `status=any` (or comma-joined statuses) was
+  // implicated in triggering bad-route paths on at least one production WP install.
+  status?: 'trash';
   onPage?: (page: {
     page: number;
     items: number;
@@ -405,7 +408,10 @@ export function createRestClient(opts: RestClientOptions): RestClient {
     }
   }
 
-  function listingParams(modifiedAfter: string | null | undefined): Record<string, string> {
+  function listingParams(
+    modifiedAfter: string | null | undefined,
+    status: 'trash' | undefined,
+  ): Record<string, string> {
     const params: Record<string, string> = {
       context: 'edit',
       per_page: String(ITEM_PER_PAGE),
@@ -414,11 +420,13 @@ export function createRestClient(opts: RestClientOptions): RestClient {
       order: 'asc',
     };
     if (modifiedAfter) params['modified_after'] = modifiedAfter;
+    if (status) params['status'] = status;
     return params;
   }
 
   interface ListingVariant {
     modifiedAfter: string | null | undefined;
+    status: 'trash' | undefined;
   }
 
   function nextListingVariant(
@@ -437,13 +445,14 @@ export function createRestClient(opts: RestClientOptions): RestClient {
         const url = buildUrl(
           opts.siteUrl,
           endpointFor(type),
-          listingParams(variant.modifiedAfter),
+          listingParams(variant.modifiedAfter, variant.status),
         );
         return paginatedGet<RestItem>((u) => send(u, { retry: true }), url, listOpts.onPage);
       };
       return (async function* () {
         let variant: ListingVariant = {
           modifiedAfter: listOpts.modifiedAfter,
+          status: listOpts.status,
         };
         const seen = new Set<string>();
         for (;;) {
@@ -464,7 +473,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
     async countItems(type, listOpts) {
       const count = async (variant: ListingVariant) => {
         const params = {
-          ...listingParams(variant.modifiedAfter),
+          ...listingParams(variant.modifiedAfter, variant.status),
           per_page: '1',
         };
         const url = buildUrl(opts.siteUrl, endpointFor(type), params);
@@ -475,6 +484,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
       };
       let variant: ListingVariant = {
         modifiedAfter: listOpts.modifiedAfter,
+        status: listOpts.status,
       };
       const seen = new Set<string>();
       for (;;) {
