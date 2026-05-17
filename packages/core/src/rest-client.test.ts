@@ -432,7 +432,7 @@ describe('rest-client', () => {
     expect(url).not.toContain('force=1');
   });
 
-  it('deleteItem does not retry on 5xx', async () => {
+  it('deleteItem retries on 5xx (idempotent — DELETE /<type>/<id>)', async () => {
     const fetchImpl = vi.fn(async () => new Response('boom', { status: 502 }));
     const client = createRestClient({
       siteUrl: 'https://example.com',
@@ -441,7 +441,19 @@ describe('rest-client', () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     await expect(client.deleteItem('post', 1)).rejects.toBeInstanceOf(TransportError);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it('updateItem retries on 5xx (idempotent — POST /<type>/<id>)', async () => {
+    const fetchImpl = vi.fn(async () => new Response('boom', { status: 502 }));
+    const client = createRestClient({
+      siteUrl: 'https://example.com',
+      username: 'a',
+      password: 'b',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(client.updateItem('post', 1, {})).rejects.toBeInstanceOf(TransportError);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it('getItem fetches one item by id with edit context', async () => {

@@ -508,6 +508,8 @@ export function createRestClient(opts: RestClientOptions): RestClient {
     },
 
     async createItem(type, payload) {
+      // POST to the collection endpoint creates a new record; retrying after a 5xx
+      // could create duplicates if the first request actually succeeded.
       const url = buildUrl(opts.siteUrl, endpointFor(type), { context: 'edit' });
       const res = await send(url, {
         method: 'POST',
@@ -522,7 +524,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
       const res = await send(url, {
         method: 'POST',
         body: JSON.stringify(payload),
-        retry: false,
+        retry: true,
       });
       return parseJson<RestItem>(res, url.toString());
     },
@@ -532,7 +534,7 @@ export function createRestClient(opts: RestClientOptions): RestClient {
       const url = buildUrl(opts.siteUrl, `${endpointFor(type)}/${id}`);
       const res = await send(url, {
         method: 'DELETE',
-        retry: false,
+        retry: true,
       });
       await res.text();
     },
