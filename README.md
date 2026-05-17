@@ -39,6 +39,7 @@ If you write long-form posts, you probably already have a text editor you love. 
 - **Mirror posts as plain files** for local editing, Git tracking, and backup.
 - **Incremental sync in both directions**, driven by `modified_gmt` timestamps.
 - **Round-trip integrity**: a post pulled and immediately pushed back produces no diff on the server.
+- **Downstream-friendly output**: anything that reads text can analyse your content offline. See [`cms-insight`](https://github.com/jcabot/cms-insight) for an example of running analyses over a `wpsync` content tree.
 - **Single-user, single-site, scriptable** — designed for one author with a terminal, not a team.
 
 ## How it works
