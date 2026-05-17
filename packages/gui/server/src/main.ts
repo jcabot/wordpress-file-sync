@@ -19,6 +19,20 @@ const server = app.listen(PORT, '127.0.0.1', () => {
   }
 });
 
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `Port ${PORT} is already in use on 127.0.0.1. ` +
+        `Stop the other wpsync GUI instance or set WPSYNC_PORT to a different port.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  console.error(`Failed to start wpsync GUI server: ${err.message}`);
+  process.exitCode = 1;
+});
+
 const shutdown = (): void => {
   server.close(() => process.exit(0));
 };
